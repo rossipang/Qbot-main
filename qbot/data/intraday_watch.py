@@ -14,11 +14,14 @@ from qbot.data.forward_watch import (
     _day_kline_structure,
     _detect_buy_setup,
     _detect_t1_short_setup,
+    _get_risk_bars,
     _near_price_buy_band,
     _resolve_buy_method,
     _suggest_buy_plan,
     _to_float,
+    _today,
 )
+from qbot.data.forward_timing import format_hold_cell, hold_exit_hint
 from qbot.data.industry_screener import _fetch_ulist_quote_map
 
 WATCH_PATH = (
@@ -1011,6 +1014,32 @@ def _score_holding(
     else:
         confirm = 0
 
+    # V5 持有出场（相对成本）：只挂在持仓盯盘，有成本才有意义
+    hold_cell = ""
+    hold_label = ""
+    try:
+        bars = _get_risk_bars(code, _today(), limit=28, fast_fetch=True)
+        hint = hold_exit_hint(bars, cost=cost)
+        hold_cell = format_hold_cell(hint)
+        hold_label = str(hint.get("label") or "")
+        urg = int(hint.get("urgency") or 0)
+        # 与盘中卖点合并：更严的一侧生效（新仓保护期内不因「近高」抬卖）
+        if not fresh_protect:
+            if urg >= 2 and advice in ("持有", "观察"):
+                advice = "减仓"
+                phase = hold_label or "峰值/双阴减仓"
+                why_parts.append(f"V5出场:{hold_label}")
+            elif urg == 1 and advice == "持有":
+                advice = "观察"
+                phase = hold_label or phase
+                why_parts.append(f"V5留意:{hold_label}")
+            elif hold_cell:
+                why_parts.append(f"出场:{hold_cell}")
+        elif hold_cell:
+            why_parts.append(f"出场参考:{hold_cell}(新仓未满45分)")
+    except Exception:
+        hold_cell = ""
+
     sig = {"持有": "绿", "观察": "黄", "减仓": "橙", "卖出": "红"}.get(advice, "黄")
     action_map = {
         "持有": "继续持有：上涨/浅回，勿因毛刺卖",
@@ -1039,6 +1068,7 @@ def _score_holding(
         "走势阶段": phase,
         "卖出建议": advice,
         "信号": sig,
+        "持有出场": hold_cell,
         "操作建议": action_map.get(advice, ""),
         "依据": "；".join(str(x) for x in why_parts if x),
         "大盘": mgrade,

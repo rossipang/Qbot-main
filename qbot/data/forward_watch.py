@@ -74,7 +74,7 @@ LATEST_PATH = (
 )
 
 # 管道版本：缓存里可对照是否按新规则刷新
-PIPELINE_VERSION = "forward_v7_23_ml"
+PIPELINE_VERSION = "forward_v7_24_hold_intraday"
 
 # 风险分用日K缓存：code:asof → bars（单次刷新内复用）
 _RISK_BARS_CACHE: Dict[str, List[Dict[str, Any]]] = {}
@@ -7212,17 +7212,26 @@ def build_daily_short_picks(
             continue
 
         total = (
-            bscore * 0.28
-            + (4.0 if setup.get("buy_ok") else 0.0)
-            + min(max(flow or 0.0, 0.0), 6.0) * 0.45
-            + (2.2 if 0.3 <= (pct or -99) <= 3.2 else 0.0)
-            + (1.2 if kind in ("t1_hot_continue", "t1_resume", "mild_inflow_run") else 0.0)
+            bscore * 0.18
+            + (3.5 if setup.get("buy_ok") else 0.0)
+            + min(max(flow or 0.0, 0.0), 6.0) * 0.35
+            + (2.5 if 0.3 <= (pct or -99) <= 2.5 else 0.0)
+            + (1.0 if kind in ("t1_hot_continue", "t1_resume", "mild_inflow_run", "stabilize_up", "t1_dip_hold") else 0.0)
             + (1.5 if nh >= 2 else (0.8 if nh >= 1 else 0.0))
-            + min(mild_days, 3) * 0.5
+            + min(mild_days, 3) * 0.45
             + (1.0 if (board_pct or 0) >= 1.0 else 0.0)
-            + max(risk_score, -40.0) * 0.04
+            + max(risk_score, -40.0) * 0.06
         )
-        # P1：GBDT 短线分融合排序
+        # 盘口/相对强弱直接改排序（不仅改风险说明）
+        struct = timing.get("structure") or {}
+        total += float(struct.get("risk_delta") or 0) * 0.12
+        rs_pack = timing.get("rs") or {}
+        total += float(rs_pack.get("risk_delta") or 0) * 0.12
+        if struct.get("favors_early_buy"):
+            total += 1.4
+        if timing.get("veto_chase"):
+            total -= 2.5
+        # P1：GBDT 短线分融合排序（ML 权重大，拉开先后）
         rs_val = timing.get("rs_val")
         ml_pack = score_short_ml(
             _get_risk_bars(code, asof, limit=28, fast_fetch=True),
@@ -7238,6 +7247,10 @@ def build_daily_short_picks(
         ml_score = float(ml_pack.get("ml_score") or 0.0)
         factor_why = str(ml_pack.get("因子贡献") or "")
         total = blend_short_rank(total, ml_score)
+        if ml_score >= 1.5:
+            total += 0.8
+        elif ml_score <= -0.8:
+            total -= 1.5
         sig, sig_lab = "红", str(setup.get("label") or "短线可买")
         if (
             total < 5.2

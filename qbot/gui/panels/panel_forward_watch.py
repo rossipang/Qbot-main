@@ -32,17 +32,17 @@ _STOCK_VISIBLE_ROWS = 16
 from qbot.gui.panels.panel_quote_detail import open_quote_detail
 
 # 个股表列序（改列时同步改这里，避免再把行业当成代码）
-# 信号0 主线星1 买点星2 涨跌概率3 风险4 连入5 状态6 候选7 方法8 操作9 持有出场10
-# 概念11 行业12 代码13 名称14 现价15 建议16 涨跌17 5日18 依据19
-_S_COL_CONCEPT = 11
-_S_COL_CODE = 13
-_S_COL_NAME = 14
-_S_COL_PCT = 17
-_S_COL_PCT5 = 18
+# 信号0 主线星1 买点星2 涨跌概率3 风险4 连入5 状态6 候选7 方法8 操作9
+# 概念10 行业11 代码12 名称13 现价14 建议15 涨跌16 5日17 依据18
+_S_COL_CONCEPT = 10
+_S_COL_CODE = 12
+_S_COL_NAME = 13
+_S_COL_PCT = 16
+_S_COL_PCT5 = 17
 _S_COL_BIAS = 3
 _S_COL_RISK = 4
 
-# 今日短线列序：信号0 代码1 名称2 板块3 现价4 建议买入5 买入方法6 风险值7 ML分8 涨跌%9 5日%10 操作11 持有12 入选13
+# 今日短线列序：信号0 代码1 名称2 板块3 现价4 建议买入5 买入方法6 风险值7 ML分8 涨跌%9 5日%10 操作11 入选12
 _D_COL_CODE = 1
 _D_COL_NAME = 2
 _D_COL_BOARD = 3
@@ -78,9 +78,9 @@ class ForwardWatchPanel(wx.Panel):
         tip = wx.StaticText(
             self,
             label=(
-                "短线周转：跟热板、持有1～3天；买入方法多选一 + 风险值(-100~100，越负越不宜买)。"
-                "盘口结构否决直拉/冲高回落追买；板强个弱不作补涨；持有出场看峰值回撤/双阴/破均线。"
-                "短线排序含GBDT(ML分)+因子贡献；今日短线都有方法与风险值；个股仅候选=是才填买入方法。"
+                "短线周转：跟热板、持有1～3天；买入方法多选一 + 风险值 + ML分排序。"
+                "盘口结构否决直拉；板强个弱不作补涨。持有出场请看「今日盯盘→持仓股」（按成本）。"
+                "今日短线都有方法与风险值；个股观察仅候选=是才填买入方法。"
             ),
         )
         tip.Wrap(1100)
@@ -129,9 +129,8 @@ class ForwardWatchPanel(wx.Panel):
                 ("ML分", 50),
                 ("涨跌%", 48),
                 ("5日%", 48),
-                ("操作建议", 90),
-                ("持有出场", 90),
-                ("入选原因", 150),
+                ("操作建议", 100),
+                ("入选原因", 180),
             ]
         )
         self._short_sizer.Add(self.lbl_short_empty, 0, wx.LEFT | wx.RIGHT | wx.TOP, 4)
@@ -178,8 +177,7 @@ class ForwardWatchPanel(wx.Panel):
                 ("状态", 45),
                 ("候选", 40),
                 ("买入方法", 95),
-                ("操作建议", 90),
-                ("持有出场", 100),
+                ("操作建议", 100),
                 ("概念", 85),
                 ("细分行业", 80),
                 ("代码", 58),
@@ -188,7 +186,7 @@ class ForwardWatchPanel(wx.Panel):
                 ("建议买入", 85),
                 ("涨跌%", 50),
                 ("5日%", 50),
-                ("依据", 110),
+                ("依据", 120),
             ]
         )
         stock_sizer.Add(self.list_stocks, 0, wx.EXPAND | wx.ALL, 4)
@@ -513,7 +511,6 @@ class ForwardWatchPanel(wx.Panel):
                     _fmt(item.get("涨跌幅%")),
                     _fmt(item.get("5日涨跌%")),
                     str(item.get("操作建议") or "")[:40],
-                    str(item.get("持有出场") or "")[:40],
                     str(item.get("因子贡献") or item.get("入选原因") or "")[:140],
                 ]
             )
@@ -541,7 +538,6 @@ class ForwardWatchPanel(wx.Panel):
                     if item.get("5日涨跌%") is not None
                     else None,
                     str(item.get("操作建议") or ""),
-                    str(item.get("持有出场") or ""),
                     str(item.get("因子贡献") or item.get("入选原因") or ""),
                 )
             )
@@ -583,7 +579,6 @@ class ForwardWatchPanel(wx.Panel):
                     str(r.get("买入候选") or "否"),
                     str(r.get("买入方法") or "")[:14],
                     str(r.get("操作建议") or "")[:36],
-                    str(r.get("持有出场") or "")[:40],
                     str(r.get("概念") or r.get("板块主题") or ""),
                     str(r.get("行业") or r.get("匹配板块") or ""),
                     code,
@@ -619,7 +614,6 @@ class ForwardWatchPanel(wx.Panel):
                     1 if r.get("买入候选") == "是" else 0,
                     str(r.get("买入方法") or ""),
                     str(r.get("操作建议") or ""),
-                    str(r.get("持有出场") or ""),
                     str(r.get("概念") or r.get("板块主题") or ""),
                     str(r.get("行业") or r.get("匹配板块") or ""),
                     code,

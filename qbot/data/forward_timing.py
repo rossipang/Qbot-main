@@ -223,23 +223,35 @@ def hold_exit_hint(
     if len(closes) >= ma_win:
         ma = sum(closes[-ma_win:]) / float(ma_win)
 
+    # 有成本时：峰值回撤主要针对「高位拿着的人」；新仓/仍接近成本则降级，避免尾盘刚买就「清/减」
+    cost_ok = cost_v is not None and cost_v > 0
+    pnl_now = out.get("pnl_pct")
+    soft_peak = bool(cost_ok and pnl_now is not None and float(pnl_now) > -3.0)
+
     if peak_dd <= -peak_dd_pct:
-        out["action"] = "reduce"
-        out["label"] = "峰值回撤减仓"
-        out["urgency"] = 2 if peak_dd <= -peak_dd_pct - 3 else 1
-        out["reasons"].append(f"距近高约{peak_dd:.1f}%")
+        if soft_peak:
+            out["action"] = "watch"
+            out["label"] = "近高回撤留意"
+            out["urgency"] = 1 if peak_dd <= -peak_dd_pct - 4 else 0
+            out["reasons"].append(
+                f"距近高约{peak_dd:.1f}%（相对你成本仍可接受，不作清仓令）"
+            )
+        else:
+            out["action"] = "reduce"
+            out["label"] = "峰值回撤减仓"
+            out["urgency"] = 2 if peak_dd <= -peak_dd_pct - 3 else 1
+            out["reasons"].append(f"距近高约{peak_dd:.1f}%")
     if two_yin and vol_blow:
         out["action"] = "reduce" if out["action"] == "hold_ok" else out["action"]
         out["label"] = "放量双阴减仓"
-        out["urgency"] = max(out["urgency"], 1)
+        out["urgency"] = max(out["urgency"], 1 if soft_peak else 2)
         out["reasons"].append("连续阴线且量能放大")
     if ma is not None and last < ma * 0.995:
-        # 仅当已有回撤或双阴时升级；单独破均线给提示
         out["reasons"].append(f"收盘低于MA{ma_win}")
         if out["urgency"] == 0:
             out["action"] = "watch"
             out["label"] = "破均线观察减"
-            out["urgency"] = 1
+            out["urgency"] = 0 if soft_peak else 1
         else:
             out["urgency"] = max(out["urgency"], 1)
             if out["action"] == "hold_ok":

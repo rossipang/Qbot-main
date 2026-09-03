@@ -535,10 +535,10 @@ def blend_short_rank(
     rule_score: float,
     ml_score: float,
     *,
-    rule_w: float = 0.55,
-    ml_w: float = 0.45,
+    rule_w: float = 0.30,
+    ml_w: float = 0.70,
 ) -> float:
-    """规则短线分与 ML 分融合。ML 以「预期%」量级，线性压到与规则分相近。"""
-    # ml_score 常见约 -3～+4；映射到规则分尺度
-    ml_scaled = 4.0 + float(ml_score) * 1.15
+    """规则短线分与 ML 分融合。提高 ML 权重，避免排序看起来「没变」。"""
+    # ml_score 常见约 -3～+5；放大到规则分尺度并拉开差距
+    ml_scaled = 5.0 + float(ml_score) * 2.2
     return rule_w * float(rule_score) + ml_w * ml_scaled

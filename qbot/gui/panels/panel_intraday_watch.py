@@ -106,7 +106,7 @@ class IntradayWatchPanel(wx.Panel):
                 "观察池最多 "
                 f"{MAX_WATCH} 只；持仓最多 {MAX_HOLDINGS} 只。"
                 "两边并行刷新互不堵。持仓：绿持有 / 黄卖区(回吐约20%或低开预警) / "
-                "红危险(回吐深、昨强今砸、破成本)；无弹窗。"
+                "红危险(回吐深、昨强今砸、破成本)；另有「持有出场」按成本+峰值回撤/双阴(V5)。无弹窗。"
             ),
         )
         tip.Wrap(1100)
@@ -185,11 +185,12 @@ class IntradayWatchPanel(wx.Panel):
                 ("量比", 46),
                 ("走势类型", 72),
                 ("高点回撤%", 70),
+                ("持有出场", 110),
                 ("板块", 80),
                 ("板块%", 52),
                 ("大盘", 40),
-                ("操作建议", 200),
-                ("依据", 260),
+                ("操作建议", 180),
+                ("依据", 240),
             ]
         )
         bot_s.Add(self.list_hold, 1, wx.EXPAND | wx.ALL, 4)
@@ -567,6 +568,7 @@ class IntradayWatchPanel(wx.Panel):
                     _fmt(r.get("量比")),
                     str(r.get("走势类型") or ""),
                     _fmt(r.get("高点回撤%")),
+                    str(r.get("持有出场") or "")[:44],
                     str(r.get("板块") or ""),
                     _fmt(r.get("板块涨跌%")),
                     str(r.get("大盘") or ""),
@@ -587,6 +589,7 @@ class IntradayWatchPanel(wx.Panel):
                     nf(r.get("量比")),
                     str(r.get("走势类型") or ""),
                     nf(r.get("高点回撤%")),
+                    str(r.get("持有出场") or ""),
                     str(r.get("板块") or ""),
                     nf(r.get("板块涨跌%")),
                     str(r.get("大盘") or ""),
@@ -594,7 +597,7 @@ class IntradayWatchPanel(wx.Panel):
                     str(r.get("依据") or ""),
                 )
             )
-            colors[i] = {6: r.get("浮盈%"), 7: r.get("涨跌幅%"), 12: r.get("板块涨跌%")}
+            colors[i] = {6: r.get("浮盈%"), 7: r.get("涨跌幅%"), 13: r.get("板块涨跌%")}
             adv = str(r.get("卖出建议") or "持有")
             pnl = nf(r.get("浮盈%"), empty=0.0)
             if adv == "卖出" or pnl <= -2.5:
