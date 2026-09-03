@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>每日新闻大事 · 2026-09-04</title>
+<style>
+:root {
+  --bg: #0f1419;
+  --bg2: #171e26;
+  --card: #1c2530;
+  --line: #2a3544;
+  --text: #e8eef6;
+  --muted: #8b9bb0;
+  --accent: #3db8a0;
+  --bull: #e85d4c;
+  --bear: #3ecf8e;
+  --soft-bull: #c47a52;
+  --soft-bear: #5aa88a;
+  --neutral: #7a8899;
+  --font: "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: var(--bg); color: var(--text);
+  font-family: var(--font); line-height: 1.55;
+}
+.wrap { max-width: 1240px; margin: 0 auto; padding: 28px 22px 60px; }
+.hero {
+  background:
+    radial-gradient(900px 280px at 10% -10%, rgba(61,184,160,.18), transparent 60%),
+    linear-gradient(180deg, #15202b 0%, var(--bg) 100%);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 28px 28px 22px;
+  margin-bottom: 22px;
+}
+.hero .kicker {
+  color: var(--accent); letter-spacing: .14em; font-size: 12px;
+  text-transform: uppercase; font-weight: 600;
+}
+.hero h1 {
+  margin: 8px 0 10px; font-size: 30px; font-weight: 700; letter-spacing: .02em;
+}
+.hero .sub { color: var(--muted); font-size: 14px; max-width: 780px; }
+.stats {
+  display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px;
+}
+.stat {
+  background: rgba(255,255,255,.04); border: 1px solid var(--line);
+  border-radius: 999px; padding: 6px 14px; font-size: 13px; color: var(--muted);
+}
+.stat b { color: var(--text); font-weight: 600; margin-right: 4px; }
+.nav {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 26px;
+  position: sticky; top: 0; z-index: 5;
+  padding: 10px 0; background: linear-gradient(180deg, var(--bg) 70%, transparent);
+}
+.nav-pill {
+  text-decoration: none; color: var(--muted);
+  border: 1px solid var(--line); background: var(--bg2);
+  border-radius: 999px; padding: 7px 12px; font-size: 13px;
+}
+.nav-pill.accent {
+  color: var(--text); border-color: rgba(61,184,160,.55);
+  background: rgba(61,184,160,.12);
+}
+.nav-pill:hover { color: var(--text); border-color: var(--accent); }
+.nav-pill span {
+  margin-left: 6px; color: var(--accent); font-variant-numeric: tabular-nums;
+}
+.sec { margin-bottom: 34px; }
+.sec-hd {
+  display: flex; align-items: baseline; gap: 12px;
+  border-bottom: 1px solid var(--line); padding-bottom: 10px; margin-bottom: 14px;
+}
+.sec-hd h2 { margin: 0; font-size: 20px; }
+.sec-count { color: var(--muted); font-size: 13px; }
+.sum-tip { color: var(--muted); font-size: 13px; margin: -6px 0 14px; }
+.table-wrap {
+  overflow-x: auto; border: 1px solid var(--line); border-radius: 14px;
+  background: var(--card);
+}
+.sum-table {
+  width: 100%; border-collapse: collapse; font-size: 13px; min-width: 980px;
+}
+.sum-table th {
+  text-align: left; padding: 12px 14px; color: var(--muted); font-weight: 600;
+  background: rgba(0,0,0,.22); border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.sum-table td {
+  padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: top;
+}
+.sum-table tr:last-child td { border-bottom: none; }
+.sum-table tr:hover td { background: rgba(255,255,255,.02); }
+.sum-table .board { font-weight: 600; white-space: nowrap; }
+.sum-table .num {
+  text-align: center; font-variant-numeric: tabular-nums; color: var(--muted);
+}
+.sum-table .stocks { min-width: 180px; }
+.sum-table .advice { color: #c5d0dc; min-width: 220px; max-width: 320px; }
+.sum-table .headline { color: var(--muted); max-width: 260px; font-size: 12px; }
+.stk {
+  display: inline-block; margin: 2px 6px 2px 0; padding: 2px 8px;
+  border-radius: 6px; background: rgba(255,255,255,.05);
+  border: 1px solid var(--line); color: var(--text); font-size: 12px;
+}
+.stk i {
+  font-style: normal; margin-left: 4px; color: var(--muted); font-size: 11px;
+}
+.muted { color: var(--muted); }
+.grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 12px;
+}
+.card {
+  background: var(--card); border: 1px solid var(--line);
+  border-radius: 14px; padding: 14px 16px 12px;
+}
+.card-hd {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin-bottom: 8px; font-size: 12px; color: var(--muted);
+}
+.card h3 {
+  margin: 0 0 10px; font-size: 15px; font-weight: 600; line-height: 1.45;
+}
+.card h3 a { color: var(--text); text-decoration: none; }
+.card h3 a:hover { color: var(--accent); }
+.stance {
+  border-radius: 6px; padding: 2px 8px; font-weight: 600; color: #0b1014;
+  display: inline-block;
+}
+.stance.bull { background: var(--bull); }
+.stance.bear { background: var(--bear); color: #062016; }
+.stance.soft-bull { background: var(--soft-bull); }
+.stance.soft-bear { background: var(--soft-bear); color: #062016; }
+.stance.neutral { background: var(--neutral); color: #101820; }
+.boards, .why { font-size: 13px; color: var(--muted); margin: 6px 0; }
+.lbl {
+  display: inline-block; min-width: 64px; color: #a9b7c9; margin-right: 6px;
+}
+.tag {
+  display: inline-block; margin: 2px 6px 2px 0; padding: 2px 8px;
+  border-radius: 999px; background: rgba(61,184,160,.12);
+  color: #9fe0d2; border: 1px solid rgba(61,184,160,.28); font-style: normal;
+  font-size: 12px;
+}
+.tag.muted { background: transparent; color: var(--muted); border-color: var(--line); }
+.empty {
+  text-align: center; color: var(--muted); padding: 60px 20px;
+  border: 1px dashed var(--line); border-radius: 14px;
+}
+.foot {
+  margin-top: 28px; color: var(--muted); font-size: 12px; text-align: center;
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="hero">
+    <div class="kicker">Daily Brief · Qbot</div>
+    <h1>每日新闻大事</h1>
+    <p class="sub">默认近3天重点新闻（优先当天）；上方为板块多空总结+相关个股+操作建议；多空为标题客观定性，操作建议含周五只卖等纪律，不构成荐股承诺。</p>
+    <div class="stats">
+      <div class="stat"><b>2026-09-04</b>数据日</div>
+      <div class="stat"><b>近3天</b>窗口</div>
+      <div class="stat"><b>2</b>条当天</div>
+      <div class="stat"><b>38</b>条重点</div>
+      <div class="stat"><b>7</b>个板块结论</div>
+      <div class="stat"><b>2026-09-04 01:19:54</b>更新</div>
+    </div>
+  </header>
+  <nav class="nav"><a class="nav-pill accent" href="#board-summary">板块总结<span>7</span></a><a class="nav-pill" href="#cat-59a0">硬科技<span>12</span></a><a class="nav-pill" href="#cat-f55a">AI应用<span>6</span></a><a class="nav-pill" href="#cat-54f1">贵金属<span>1</span></a><a class="nav-pill" href="#cat-786b">医药生物<span>7</span></a><a class="nav-pill" href="#cat-d2a3">宏观美股<span>4</span></a><a class="nav-pill" href="#cat-c359">其他<span>3</span></a></nav>
+  
+<section class="sec" id="board-summary">
+  <div class="sec-hd">
+    <h2>板块多空总结</h2>
+    <span class="sec-count">7 个板块</span>
+  </div>
+  <p class="sum-tip">按近3天新闻聚合；个股取前瞻主题种子（强相关中军），操作建议含周五纪律。</p>
+  <div class="table-wrap">
+    <table class="sum-table">
+      <thead>
+        <tr>
+          <th>板块</th>
+          <th>多空</th>
+          <th>利好</th>
+          <th>利空</th>
+          <th>强相关个股</th>
+          <th>操作建议</th>
+          <th>关键新闻</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+<tr>
+  <td class="board">美股科技/算力链</td>
+  <td><span class="stance bull">利好</span></td>
+  <td class="num">5</td>
+  <td class="num">0</td>
+  <td class="stocks"><span class="stk">英维克<i>002837</i></span><span class="stk">申菱环境<i>301018</i></span><span class="stk">冰轮环境<i>000811</i></span><span class="stk">润泽科技<i>300442</i></span><span class="stk">大元泵业<i>603757</i></span></td>
+  <td class="advice">周五只卖不买：利好只观察，持仓冲高可减；下周一开盘后再定是否试错。</td>
+  <td class="headline">【美股三大股指均涨超1% 特斯拉、SpaceX均涨超6% 戴尔回调后率先创出历史新高】财联社9月3日电，美股三大股指持续走高，道琼斯指数涨1.1；财联社9月4日电，英伟达宣布英伟达Rtx Spark Windows个人电脑将于2026年10月上市。</td>
+</tr>
+<tr>
+  <td class="board">国产服务器</td>
+  <td><span class="stance bull">利好</span></td>
+  <td class="num">3</td>
+  <td class="num">0</td>
+  <td class="stocks"><span class="stk">紫光股份<i>000938</i></span><span class="stk">浪潮信息<i>000977</i></span><span class="stk">锐捷网络<i>301165</i></span><span class="stk">中科曙光<i>603019</i></span></td>
+  <td class="advice">周五只卖不买：利好只观察，持仓冲高可减；下周一开盘后再定是否试错。</td>
+  <td class="headline">行云科技：与VD客户签署《算力租赁协议》，公司向VD客户提供算力资源租赁服务，协议服务期限为5年，含税总金额为9.22亿元。；连尚集团入选上海市首批算力生态合作伙伴名单</td>
+</tr>
+<tr>
+  <td class="board">CPO/光模块</td>
+  <td><span class="stance bull">利好</span></td>
+  <td class="num">2</td>
+  <td class="num">1</td>
+  <td class="stocks"><span class="stk">新易盛<i>300502</i></span><span class="stk">天孚通信<i>300394</i></span><span class="stk">光迅科技<i>002281</i></span><span class="stk">太辰光<i>300570</i></span><span class="stk">长光华芯<i>688048</i></span></td>
+  <td class="advice">周五只卖不买：利好只观察，持仓冲高可减；下周一开盘后再定是否试错。</td>
+  <td class="headline">美股三大股指集体高开，道指涨0.59%，标普500指数涨0.4%，纳指涨0.45%。Snowflake大涨26%，Q2业绩超预期并上调全年指引。；万亿光模块巨无霸，实控人刚套现50亿，又质押6亿还债！钱都去哪了？公司上半年净赚137亿</td>
+</tr>
+<tr>
+  <td class="board">创新药/CXO</td>
+  <td><span class="stance bull">利好</span></td>
+  <td class="num">1</td>
+  <td class="num">0</td>
+  <td class="stocks"><span class="stk">恒瑞医药<i>600276</i></span><span class="stk">百济神州<i>688235</i></span><span class="stk">药明康德<i>603259</i></span><span class="stk">凯莱英<i>002821</i></span><span class="stk">康龙化成<i>300759</i></span></td>
+  <td class="advice">周五只卖不买：利好只观察，持仓冲高可减；下周一开盘后再定是否试错。</td>
+  <td class="headline">2026医保国谈将于9月5日举行；政策利好催化创新药行情，港股通创新药ETF鹏华涨超2%</td>
+</tr>
+<tr>
+  <td class="board">半导体</td>
+  <td><span class="stance soft-bull">中性偏多</span></td>
+  <td class="num">1</td>
+  <td class="num">1</td>
+  <td class="stocks"><span class="stk">兆易创新<i>603986</i></span><span class="stk">澜起科技<i>688008</i></span><span class="stk">北京君正<i>300223</i></span><span class="stk">聚辰股份<i>688123</i></span><span class="stk">佰维存储<i>688525</i></span></td>
+  <td class="advice">周五只卖不买：利好只观察，持仓冲高可减；下周一开盘后再定是否试错。</td>
+  <td class="headline">长电科技：拟定增募资不超65亿元用于高性能计算高端先进封装平台扩产项目等；标普涨1%，创8月4日以来最大盘中涨幅，可选消费、电信板块涨约1.8%，金融、科技、房地产板块至少涨1%。 道指涨682点、涨幅1.3%，纳指涨</td>
+</tr>
+<tr>
+  <td class="board">人形机器人</td>
+  <td><span class="stance neutral">中性</span></td>
+  <td class="num">0</td>
+  <td class="num">0</td>
+  <td class="stocks"><span class="stk">拓普集团<i>601689</i></span><span class="stk">三花智控<i>002050</i></span><span class="stk">奥比中光<i>688322</i></span><span class="stk">绿的谐波<i>688017</i></span><span class="stk">双环传动<i>002472</i></span></td>
+  <td class="advice">周五：不新开仓；有浮盈先锁一半，余仓看尾盘强弱。</td>
+  <td class="headline">深圳印发推动智能机器人产业高质量发展工作方案；明新旭腾：公司不涉及人形机器人制造</td>
+</tr>
+<tr>
+  <td class="board">黄金/贵金属</td>
+  <td><span class="stance neutral">中性</span></td>
+  <td class="num">0</td>
+  <td class="num">0</td>
+  <td class="stocks"><span class="stk">中金黄金<i>600489</i></span><span class="stk">山东黄金<i>600547</i></span><span class="stk">西部黄金<i>601069</i></span><span class="stk">赤峰黄金<i>600988</i></span><span class="stk">山金国际<i>000975</i></span></td>
+  <td class="advice">周五：不新开仓；有浮盈先锁一半，余仓看尾盘强弱。</td>
+  <td class="headline">纽约期金涨3%，美联储理事沃勒释放支持按兵不动的信号让美债市场“松了口气”</td>
+</tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+<section class="sec" id="cat-59a0">
+  <div class="sec-hd">
+    <h2>硬科技</h2>
+    <span class="sec-count">12 条</span>
+  </div>
+  <div class="grid">
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 23:47</span>
+    <span class="src">财联社</span>
+    <span class="stance soft-bull">中性偏多</span>
+  </header>
+  <h3><a href="https://www.cls.cn/detail/2473665" target="_blank" rel="noreferrer">【美股三大股指均涨超1% 特斯拉、SpaceX均涨超6% 戴尔回调后率先创出历史新高】财联社9月3日电，美股三大股指持续走高，道琼斯指数涨1.18%，标普500指数涨1%，纳斯达克综合指数涨1.33%。英伟达股价上涨1.37%，苹果股价上涨</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">美股科技/算力链</em></div>
+  <p class="why"><span class="lbl">客观分析</span>多空并存，偏多措辞略多</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-04 00:10</span>
+    <span class="src">财联社</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="https://www.cls.cn/detail/2473685" target="_blank" rel="noreferrer">财联社9月4日电，英伟达宣布英伟达Rtx Spark Windows个人电脑将于2026年10月上市。</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">美股科技/算力链</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 21:31</span>
+    <span class="src">华尔街见闻</span>
+    <span class="stance bull">利好</span>
+  </header>
+  <h3><a href="https://wallstreetcn.com/livenews/3159992" target="_blank" rel="noreferrer">美股三大股指集体高开，道指涨0.59%，标普500指数涨0.4%，纳指涨0.45%。Snowflake大涨26%，Q2业绩超预期并上调全年指引。博通跌超4%，公司Q4指引低于市场预期。GoPro涨超6%，公司与光模块制造商Starman O</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">CPO/光模块</em><em class="tag">美股科技/算力链</em></div>
+  <p class="why"><span class="lbl">客观分析</span>标题含超预期/订单/新高/放量等偏多表述</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-04 01:00</span>
+    <span class="src">新浪财经</span>
+    <span class="stance soft-bull">中性偏多</span>
+  </header>
+  <h3><a href="https://finance.sina.com.cn/stock/usstock/c/2026-09-04/doc-iniqqsmh4195120.shtml" target="_blank" rel="noreferrer">Hugging Face首席执行官：在129亿美元收购案数周前，公司就已接触英伟达黄仁勋</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">美股科技/算力链</em></div>
+  <p class="why"><span class="lbl">客观分析</span>多空并存，偏多措辞略多</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 23:14</span>
+    <span class="src">新浪财经</span>
+    <span class="stance soft-bull">中性偏多</span>
+  </header>
+  <h3><a href="https://finance.sina.com.cn/stock/usstock/c/2026-09-03/doc-iniqqnck4262718.shtml" target="_blank" rel="noreferrer">英伟达斥资约130亿美元收购人工智能平台Hugging Face</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">美股科技/算力链</em></div>
+  <p class="why"><span class="lbl">客观分析</span>多空并存，偏多措辞略多</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 20:26</span>
+    <span class="src">新浪财经</span>
+    <span class="stance soft-bull">中性偏多</span>
+  </header>
+  <h3><a href="https://finance.sina.com.cn/stock/usstock/c/2026-09-03/doc-iniqqfvs6751451.shtml" target="_blank" rel="noreferrer">黄仁勋官宣：英伟达拟以129.3亿美元收购AI创企Hugging Face</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">美股科技/算力链</em></div>
+  <p class="why"><span class="lbl">客观分析</span>多空并存，偏多措辞略多</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 21:04</span>
+    <span class="src">华尔街见闻</span>
+    <span class="stance soft-bull">中性偏多</span>
+  </header>
+  <h3><a href="https://wallstreetcn.com/livenews/3159977" target="_blank" rel="noreferrer">行云科技：与VD客户签署《算力租赁协议》，公司向VD客户提供算力资源租赁服务，协议服务期限为5年，含税总金额为9.22亿元。</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">国产服务器</em></div>
+  <p class="why"><span class="lbl">客观分析</span>多空并存，偏多措辞略多</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 19:55</span>
+    <span class="src">华尔街见闻</span>
+    <span class="stance soft-bull">中性偏多</span>
+  </header>
+  <h3><a href="https://wallstreetcn.com/livenews/3159928" target="_blank" rel="noreferrer">长电科技：拟定增募资不超65亿元用于高性能计算高端先进封装平台扩产项目等</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">半导体</em></div>
+  <p class="why"><span class="lbl">客观分析</span>多空并存，偏多措辞略多</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 23:30</span>
+    <span class="src">华尔街见闻</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="https://wallstreetcn.com/livenews/3160056" target="_blank" rel="noreferrer">标普涨1%，创8月4日以来最大盘中涨幅，可选消费、电信板块涨约1.8%，金融、科技、房地产板块至少涨1%。 道指涨682点、涨幅1.3%，纳指涨1.4%，纳斯达克100指数涨1.2%，半导体指数跌幅收窄涨0.3%，银行指数涨1.4%，罗素2</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">半导体</em><em class="tag">美股科技/算力链</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 22:56</span>
+    <span class="src">华尔街见闻</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="https://wallstreetcn.com/livenews/3160041" target="_blank" rel="noreferrer">据上交所官网，长江存储控股股份有限公司科创板IPO审核状态变更为“已问询”。</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">半导体</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 22:49</span>
+    <span class="src">新浪财经</span>
+    <span class="stance soft-bear">中性偏空</span>
+  </header>
+  <h3><a href="https://finance.sina.com.cn/stock/s/2026-09-03/doc-iniqqnck4252529.shtml" target="_blank" rel="noreferrer">万亿光模块巨无霸，实控人刚套现50亿，又质押6亿还债！钱都去哪了？公司上半年净赚137亿</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">CPO/光模块</em></div>
+  <p class="why"><span class="lbl">客观分析</span>多空并存，偏空措辞略多</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 18:56</span>
+    <span class="src">新浪财经</span>
+    <span class="stance soft-bull">中性偏多</span>
+  </header>
+  <h3><a href="https://finance.sina.com.cn/tech/it/2026-09-03/doc-iniqpzpq4315054.shtml" target="_blank" rel="noreferrer">连尚集团入选上海市首批算力生态合作伙伴名单</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">国产服务器</em></div>
+  <p class="why"><span class="lbl">客观分析</span>多空并存，偏多措辞略多</p>
+</article></div>
+</section>
+
+<section class="sec" id="cat-f55a">
+  <div class="sec-hd">
+    <h2>AI应用</h2>
+    <span class="sec-count">6 条</span>
+  </div>
+  <div class="grid">
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 21:49</span>
+    <span class="src">华尔街见闻</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="https://wallstreetcn.com/livenews/3160003" target="_blank" rel="noreferrer">深圳印发推动智能机器人产业高质量发展工作方案</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">人形机器人</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 22:59</span>
+    <span class="src">华尔街见闻</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="https://wallstreetcn.com/livenews/3160043" target="_blank" rel="noreferrer">明新旭腾：公司不涉及人形机器人制造</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">人形机器人</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 21:16</span>
+    <span class="src">新浪财经</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="https://finance.sina.com.cn/jjxw/2026-09-03/doc-iniqqfvs6781787.shtml" target="_blank" rel="noreferrer">小米机器人海外首秀引围观，现场打招呼、比耶</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">人形机器人</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 19:31</span>
+    <span class="src">新浪财经</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="https://finance.sina.com.cn/jjxw/2026-09-03/doc-iniqpzpu2029233.shtml" target="_blank" rel="noreferrer">探访天工机器人夺冠背后的数据基地，基地负责人夏华林：动捕数据非常有用</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">人形机器人</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 19:07</span>
+    <span class="src">新浪财经</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="https://finance.sina.com.cn/jjxw/2026-09-03/doc-iniqpzps1095859.shtml" target="_blank" rel="noreferrer">北京人形数据基地下载量破2000万，基地负责人夏华林：未来具身智能最核心的竞争点是数据飞轮</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">人形机器人</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 17:25</span>
+    <span class="src">新浪财经</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="https://finance.sina.com.cn/jjxw/2026-09-03/doc-iniqpvfw2110370.shtml" target="_blank" rel="noreferrer">脉脉林凡：具身岗位需求增长6至7倍，人才供给仍然跟不上</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">人形机器人</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article></div>
+</section>
+
+<section class="sec" id="cat-54f1">
+  <div class="sec-hd">
+    <h2>贵金属</h2>
+    <span class="sec-count">1 条</span>
+  </div>
+  <div class="grid">
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 23:05</span>
+    <span class="src">华尔街见闻</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="https://wallstreetcn.com/livenews/3160048" target="_blank" rel="noreferrer">纽约期金涨3%，美联储理事沃勒释放支持按兵不动的信号让美债市场“松了口气”</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">黄金/贵金属</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article></div>
+</section>
+
+<section class="sec" id="cat-786b">
+  <div class="sec-hd">
+    <h2>医药生物</h2>
+    <span class="sec-count">7 条</span>
+  </div>
+  <div class="grid">
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 19:02</span>
+    <span class="src">华尔街见闻</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="https://wallstreetcn.com/livenews/3159899" target="_blank" rel="noreferrer">2026医保国谈将于9月5日举行</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">创新药/CXO</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 14:47</span>
+    <span class="src">东方财富证券</span>
+    <span class="stance soft-bull">中性偏多</span>
+  </header>
+  <h3><a href="http://finance.eastmoney.com/a/202609033864002330.html" target="_blank" rel="noreferrer">政策利好催化创新药行情，港股通创新药ETF鹏华涨超2%</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">创新药/CXO</em></div>
+  <p class="why"><span class="lbl">客观分析</span>多空并存，偏多措辞略多</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 19:46</span>
+    <span class="src">21世纪经济报道</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="http://stock.eastmoney.com/a/202609033864309494.html" target="_blank" rel="noreferrer">中证创新药产业指数上涨1%，创新药ETF易方达（516080）连续4日获资金加码</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">创新药/CXO</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 18:51</span>
+    <span class="src">证券日报</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="http://finance.eastmoney.com/a/202609033864201553.html" target="_blank" rel="noreferrer">赛伦生物：关于参加科创板2026年半年度生物制品及 CXO 行业集体业绩说明会的公告</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">创新药/CXO</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 18:05</span>
+    <span class="src">每日经济新闻</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="http://stock.eastmoney.com/a/202609033864382561.html" target="_blank" rel="noreferrer">创新药产业指数上涨1%，创新药ETF易方达（516080）连续4日获资金加码</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">创新药/CXO</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 14:29</span>
+    <span class="src">每日经济新闻</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="http://stock.eastmoney.com/a/202609033863983275.html" target="_blank" rel="noreferrer">港股创新药概念股午后持续走强，港股通创新药ETF涨超2%</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">创新药/CXO</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 14:59</span>
+    <span class="src">第一财经</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="http://finance.eastmoney.com/a/202609033864003250.html" target="_blank" rel="noreferrer">创新药概念局部回暖</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">创新药/CXO</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article></div>
+</section>
+
+<section class="sec" id="cat-d2a3">
+  <div class="sec-hd">
+    <h2>宏观美股</h2>
+    <span class="sec-count">4 条</span>
+  </div>
+  <div class="grid">
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 23:21</span>
+    <span class="src">华尔街见闻</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="https://wallstreetcn.com/livenews/3160054" target="_blank" rel="noreferrer">纳斯达克100指数涨幅扩大至1%，纳指涨1.2%，标普涨0.9%，道指涨1.1%。</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">美股科技/算力链</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-01 08:18</span>
+    <span class="src">财联社</span>
+    <span class="stance neutral">中性</span>
+  </header>
+  <h3><a href="http://finance.eastmoney.com/news/1344,202609013860759732.html" target="_blank" rel="noreferrer">高盛评Q2财报：“AI投资巨浪”远未结束 2028年才能达到供需平衡！</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag muted">未映射到具体板块</em></div>
+  <p class="why"><span class="lbl">客观分析</span>信息增量或方向不明，不作单边定性</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 23:56</span>
+    <span class="src">财联社</span>
+    <span class="stance soft-bull">中性偏多</span>
+  </header>
+  <h3><a href="https://www.cls.cn/detail/2473668" target="_blank" rel="noreferrer">【比特币价格重回8.1万美元上方 过去24小时大涨5%】财联社9月3日电，以比特币为首的加密货币持续走高，行情显示，比特币涨至81188.4美元，过去24小时内涨5.13%；以太坊涨至2510.15美元，过去24小时内涨5.17%。</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag muted">未映射到具体板块</em></div>
+  <p class="why"><span class="lbl">客观分析</span>多空并存，偏多措辞略多</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 23:50</span>
+    <span class="src">财联社</span>
+    <span class="stance soft-bull">中性偏多</span>
+  </header>
+  <h3><a href="https://www.cls.cn/detail/2473666" target="_blank" rel="noreferrer">财联社9月3日电，特斯拉股价涨幅扩大至7%以上，创6月以来最大涨幅。</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag muted">未映射到具体板块</em></div>
+  <p class="why"><span class="lbl">客观分析</span>多空并存，偏多措辞略多</p>
+</article></div>
+</section>
+
+<section class="sec" id="cat-c359">
+  <div class="sec-hd">
+    <h2>其他</h2>
+    <span class="sec-count">3 条</span>
+  </div>
+  <div class="grid">
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 19:13</span>
+    <span class="src">新浪财经</span>
+    <span class="stance soft-bull">中性偏多</span>
+  </header>
+  <h3><a href="https://finance.sina.com.cn/jjxw/2026-09-03/doc-iniqpzps1099856.shtml" target="_blank" rel="noreferrer">EVG与合作伙伴开发下一代可规模化共封装光学架构</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag">CPO/光模块</em></div>
+  <p class="why"><span class="lbl">客观分析</span>多空并存，偏多措辞略多</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 23:53</span>
+    <span class="src">华尔街见闻</span>
+    <span class="stance bull">利好</span>
+  </header>
+  <h3><a href="https://wallstreetcn.com/livenews/3160066" target="_blank" rel="noreferrer">美国7月铜进口量创历史新高</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag muted">未映射到具体板块</em></div>
+  <p class="why"><span class="lbl">客观分析</span>标题含超预期/订单/新高/放量等偏多表述</p>
+</article>
+<article class="card">
+  <header class="card-hd">
+    <span class="time">2026-09-03 21:04</span>
+    <span class="src">华尔街见闻</span>
+    <span class="stance soft-bear">中性偏空</span>
+  </header>
+  <h3><a href="https://wallstreetcn.com/livenews/3159978" target="_blank" rel="noreferrer">海默科技：大股东窦剑文拟减持不超过1%。</a></h3>
+  <div class="boards"><span class="lbl">相关板块</span><em class="tag muted">未映射到具体板块</em></div>
+  <p class="why"><span class="lbl">客观分析</span>多空并存，偏空措辞略多</p>
+</article></div>
+</section>
+  <div class="foot">多空为标题层面客观归类；个股为主题种子非荐股名单 · 来源含财联社 / 华尔街见闻 / 东财·新浪</div>
+</div>
+</body>
+</html>
