@@ -68,8 +68,6 @@
 <br>
 
 <div align="center">
-  
-  🎺 <b>号外</b>：Qbot微信小程序开发招募 [UFund-miniprogram](https://github.com/UFund-Me/UFund-miniprogram)
 
   <b>不建议 fork 项目，本项目会持续更新，只 fork 看不到更新，建议 Star ⭐️ ~</b>
 
@@ -213,7 +211,7 @@ python main.py  #if run on Mac, please use 'pythonw main.py'
     <tr>
         <td colspan="3" rowspan="1" class="ai-notebooks-table-points ai-orange-link">
             <div class="features-2 mdl-grid">
-                <h2 style="text-align:center">4. 多种提示方式：邮件 + 飞书 + 弹窗 + 微信</h2>
+                <h2 style="text-align:center">4. 多种提示方式：邮件 + 飞书 + 弹窗</h2>
                 <p>这是qbot的消息提示模块，多种方式提示交易信息：交易买卖信息、每日交易收益结果、股票每日推荐等。</p>
             </div>
         </td>
@@ -559,9 +557,6 @@ Qbot买卖强弱指标(收费)
 - 其他券商通用同花顺客户端(需要手动登陆)
 
 
-<b>开通方式<b>：微信Yida_Zhang2 (注明：开户)
-------
-
 ### 实盘交易接口
 > 欢迎更多交易所、柜台开放交易api
 
@@ -651,12 +646,9 @@ Qbot买卖强弱指标(收费)
 | pro(专业版) | 专业付费版（年费，更新代码）  | <br />- 量化交易智库（研报复现、前沿策略探索、投研资讯））<br />- qbot_pro 包含基础版本的所有功能，并且实现AI选股、数据获取清洗、策略开发、策略回测、模拟交易、实盘自动化交易全流程闭环<br />- 封装好的接口示例、系统源码开发示例<br />- 易于开发的策略模板和因子表达式<br />- 分层架构设计，数据、策略(回测、实盘交易)中间表达。<br />- 社群答疑服务<br />- 遵循《署名-非商业性使用-相同方式共享》开放协议的其他非商业用途的二次开发<br /> | <br />- 个人量化交易员、证券交易从业者<br />- 希望快速学习量化并在股票、基金、虚拟货币实现量化交易的<br /> |
 | vip   | 1对1的会员专项服务（年费，每年更新代码） | <br /><br />- 最新的量化交易系统，包含基础版本和专业版的所有软件功能 <br />- 提供封装好的基金、股票、期货、及现货和合约量化接口 （支持Binance现货、合约） <br />-  多个智能量化策略示例 <br />-  远程技术支持和服务 <br /> | <br />- 量化交易员<br />- 希望快速学习量化并在相关市场实现量化交易的<br />- 定制相关市场接口<br /> |
 
-> [!TIP]
-> 相关软件版本付费及更多信息、答疑解惑，添加微信 Yida_Zhang2
-
 ## 策略原理及源码分析
 
-本项目编写了详细的策略原理说明和平台搭建到使用的详细文档，尤其适合量化小白。欢迎加群交流！
+本项目编写了详细的策略原理说明和平台搭建到使用的详细文档，尤其适合量化小白。
 
 [在线文档](https://ufund-me.github.io/Qbot/#/) | [❓ 常见问题](https://ufund-me.github.io/Qbot/#/04-%E5%B8%B8%E8%A7%81%E9%97%AE%E9%A2%98/FQA) | [Jupyter Notebook](./backend/pytrader/strategies/notebook)
 
@@ -744,73 +736,6 @@ We appreciate all contributions to improve Qbot. Please refer to [CONTRIBUTING.m
 
 ## 🍮 Community
 - Github <a href="https://github.com/UFund-Me/Qbot/discussions" target="_blank">discussions 💬</a> or <a href="https://github.com/UFund-Me/Qbot/issues" target="_blank">issues 💭</a>
-
-- 微信: Yida_Zhang2
-- Email: yidazhang1#gmail.com 
-- 知乎/小红书：[@Charmve](https://www.zhihu.com/people/MaiweiE-com) | [@Charmve](https://www.xiaohongshu.com/user/profile/5f0a6ef9000000000100104a?xhsshare=CopyLink&appuid=5f0a6ef9000000000100104a&apptime=1725162795&share_id=2e375d139cbb494eba7f42de4cf15bae)
-<br>
-
-- 知识星球：AI量化投研实验室 （加我微信，邀请）
-  - 本星球为VIP付费社群，对于购买Pro版本的用户，可免费加入。拓展人脉，及时获取研报和论文解读与源代码实现，多种投顾服务。
-
-<br>
-
-<table class="table table-striped table-bordered table-vcenter">
-    <tbody class=ai-notebooks-table-content>
-    <tr>
-        <td width=33%>
-            <div class="mdl-cell mdl-cell--4-col">
-                <a href="https://github.com/UFund-Me/.github/assets/29084184/c8782e38-be7d-4839-bad0-6736bfb9ab9e"><img class="illustration_img" width="320" alt="添加个人微信" src="./qbot/asserts/statics/imgs/wechat.png"></img></a> <br>个人微信
-            </div>
-        </td>
-        <td width=33%>
-            <div class="mdl-cell mdl-cell--4-col">
-                <a href="https://github.com/UFund-Me/.github/assets/29084184/712a460f-a264-4f16-a7b8-c990106ec624"><img class="illustration_img" width="318" alt="加入微信交流群" src="https://github.com/UFund-Me/Qbot/assets/29084184/c81a0983-b5c4-43b5-acb5-3bd98010f7e3"/></a> <br>Qbot用户微信交流群
-            </div>
-        </td>
-        <td width=33%>
-            <div class="mdl-cell mdl-cell--4-col">
-                <a href="https://github.com/UFund-Me/.github/assets/29084184/9d3983ff-ece8-4f99-8579-94234987dcf2"><img class="illustration_img" height="320" alt="加入知识星球（付费）" src="./qbot/asserts/statics/imgs/zsxq.png"/></a> <br> <sup>AI量化交易策略分享、实盘交易教程、实时数据接口</sup> <br>知识星球（付费）
-            </div>
-        </td>
-    </tr>
-    </tbody>
-</table>
-
-若二维码因 Github 网络无法打开，请点击[二维码](https://charmve.github.io/img/contact-card.png)直接打开图片。
-
-<br>
-
-<table align="center"><tbody>
-  <tr>
-    <td colspan="2" rowspan="1">
-      <h4>🎉 本项目刚上线就收到了两次GitHub官方趋势榜Top5、Top1好成绩! </h4>
-      <p>现对于转发本项目到朋友圈或100人以上微信群等，可获得<b>知识星球价值20元的 🎫优惠券 一张</b>, 限时10张。</p>
-    </td>
-  </tr>
-  <tr>
-    <td colspan="1" rowspan="5" class="ai-notebooks-table-points ai-orange-link">
-        <div align="center">
-            <a href="https://github.com/UFund-Me/Qbot" target="_blank"><img src="https://img.shields.io/badge/-💮 %20Qbot-red.svg" alt="Qbot" title="Qbot"></a>&nbsp;
-            <a class="https://github.com/UFund-Me/Qbot">
-              <img class="ai-header-badge-img" src="https://img.shields.io/github/stars/UFund-Me/Qbot.svg?style=social&label=Star">
-            </a>&nbsp;
-            <a href="https://raw.githubusercontent.com/UFund-Me/Qbot/main/gui/imgs/wechat.png" target="_blank"><img src="https://img.shields.io/badge/-WeChat-lightgreen.svg?logo=WeChat"></a>
-            <p>🔥Among the <a href="https://github.com/topics/quant-trade" target="_blank">top 10</a> Quant &amp; Trade repos on GitHub</p>
-        </div>
-        <ul> 主要包含两部分：在本项目的基础下，
-            <li>增加更多策略研究，包含回测源码（请先学会有本项目中的策略库）；</li>
-            <li>增加实盘接入方式的源代码；</li>
-            <li>策略交流，AI投研实验室MeetUp线上/线下活动（对于基础薄弱的同学，欢迎进微信群答疑）</li>
-            <li>最近较为受欢迎的一个福利点：AI选股推荐列表邮件订阅，这有个样例 https://github.com/UFund-Me/Qbot/issues/37</li>
-        </ul>
-      </td>
-      <td>
-        <img align="center" src="https://github.com/UFund-Me/Qbot/assets/29084184/bb5ec619-887a-4ba7-a9d7-9e8b083bbb1a" height="320" alt="知识星球优惠券">
-      </td>
-</tr></tbody></table>
-
-<br>
 
 ## :warning: Disclaimer
 
