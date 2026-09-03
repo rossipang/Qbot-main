@@ -49,6 +49,19 @@ from qbot.data.industry_screener import (
     news_title_is_major_catalyst,
     set_board_fetch_fast,
 )
+from qbot.data.forward_timing import (
+    apply_timing_to_risk,
+    enrich_buy_setup_with_structure,
+    format_hold_cell,
+    hold_exit_hint,
+    ohlc_intraday_structure,
+    relative_strength_vs_board,
+)
+from qbot.data.forward_ml_score import (
+    blend_short_rank,
+    ensure_short_model,
+    score_short_ml,
+)
 
 # 观察/短线永久排除：名称易与板块混淆、不当实体中军（300024「机器人」）
 _OBSERVE_EXCLUDE_CODES = frozenset({"300024"})
@@ -61,7 +74,7 @@ LATEST_PATH = (
 )
 
 # 管道版本：缓存里可对照是否按新规则刷新
-PIPELINE_VERSION = "forward_v7_21_compute_rental"
+PIPELINE_VERSION = "forward_v7_23_ml"
 
 # 风险分用日K缓存：code:asof → bars（单次刷新内复用）
 _RISK_BARS_CACHE: Dict[str, List[Dict[str, Any]]] = {}
@@ -4875,7 +4888,7 @@ def _score_buy_timing_stars(
         # 回踩/十字星日：5日偏热不扣或轻扣
     elif stock_pct_5d is not None and float(stock_pct_5d) >= 14.0:
         if stock_pct is not None and float(stock_pct) >= 2.5:
-        score -= 1
+            score -= 1
             reasons.append(f"近5日+{float(stock_pct_5d):.1f}%偏透支且仍冲，买点 -1")
 
     if chase_pen:
@@ -6187,7 +6200,11 @@ def _asof_yyyymmdd(asof: str) -> str:
 def _get_risk_bars(
     code: str, asof: str, limit: int = 28, *, fast_fetch: bool = False
 ) -> List[Dict[str, Any]]:
-    """取截止 asof 的日K（含开收），供阳线连阳与 CFA 波动/回撤。"""
+    """取截止 asof 的日K（含开收），供阳线连阳与 CFA 波动/回撤。
+
+    fast_fetch 仅走东财短超时；若为空必须回退完整拉取，否则会把空结果缓存成
+    「持有出场=K线不足」且风险/ML 也失真。
+    """
     code = str(code or "").zfill(6)
     end = _asof_yyyymmdd(asof)
     if len(code) != 6 or len(end) != 8:
@@ -6195,15 +6212,22 @@ def _get_risk_bars(
     key = f"{code}:{end}:{int(limit)}"
     if key in _RISK_BARS_CACHE:
         return _RISK_BARS_CACHE[key]
+    bars: List[Dict[str, Any]] = []
     try:
         if fast_fetch:
-            bars = _fetch_kline_bars_fast(code, end, limit=int(limit))
+            bars = _fetch_kline_bars_fast(code, end, limit=int(limit)) or []
         else:
-            bars = _fetch_kline_bars(code, end, limit=int(limit))
+            bars = _fetch_kline_bars(code, end, limit=int(limit)) or []
     except Exception:
         bars = []
     # 只要 <= asof
-    out = [b for b in (bars or []) if str(b.get("date") or "")[:8] <= end]
+    out = [b for b in bars if str(b.get("date") or "")[:8] <= end]
+    if not out and fast_fetch:
+        try:
+            bars = _fetch_kline_bars(code, end, limit=int(limit)) or []
+        except Exception:
+            bars = []
+        out = [b for b in bars if str(b.get("date") or "")[:8] <= end]
     _RISK_BARS_CACHE[key] = out
     return out
 
@@ -6715,6 +6739,78 @@ _RISK_BUY_FLOOR = -25.0
 _RISK_HARD_REJECT = -55.0
 
 
+def _risk_tier_from_score(score: float) -> str:
+    if score >= 35:
+        return "低风险"
+    if score >= 10:
+        return "偏低风险"
+    if score >= -15:
+        return "中性"
+    if score >= -40:
+        return "偏高风险"
+    return "高风险"
+
+
+def _apply_forward_timing(
+    *,
+    code: str,
+    asof: str,
+    ohlc: Dict[str, Any],
+    pct: Optional[float],
+    board_pct: Optional[float],
+    risk_score: float,
+    risk: Dict[str, Any],
+    buy_setup: Dict[str, Any],
+    method_setup: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """盘口结构 + 相对强弱 + V5 持有出场；改风险分并可能否决追买。"""
+    struct = ohlc_intraday_structure(
+        ohlc.get("open"),
+        ohlc.get("high"),
+        ohlc.get("low"),
+        ohlc.get("close"),
+        ohlc.get("prev_close"),
+    )
+    rs = relative_strength_vs_board(pct, board_pct)
+    bars = _get_risk_bars(code, asof, limit=28, fast_fetch=True)
+    hold = hold_exit_hint(bars)
+    new_score, notes = apply_timing_to_risk(
+        risk_score, structure=struct, rs=rs
+    )
+    setup2 = enrich_buy_setup_with_structure(dict(buy_setup or {}), struct)
+    method2 = (
+        enrich_buy_setup_with_structure(dict(method_setup or {}), struct)
+        if method_setup is not None
+        else setup2
+    )
+    risk2 = dict(risk or {})
+    risk2["风险值"] = round(float(new_score), 1)
+    risk2["风险档"] = _risk_tier_from_score(float(new_score))
+    risk2["可短做"] = float(new_score) >= _RISK_BUY_FLOOR
+    risk2["宜谨慎"] = -40.0 <= float(new_score) < _RISK_BUY_FLOOR
+    risk2["宜拒绝"] = float(new_score) < _RISK_HARD_REJECT
+    if notes:
+        base = str(risk2.get("风险说明") or "").rstrip("；")
+        add = "；".join(notes[:5])
+        risk2["风险说明"] = f"{base}；{add}" if base else add
+    return {
+        "risk_score": float(new_score),
+        "risk": risk2,
+        "buy_setup": setup2,
+        "method_setup": method2,
+        "structure": struct,
+        "rs": rs,
+        "hold": hold,
+        "hold_cell": format_hold_cell(hold),
+        "notes": notes,
+        "is_dull": bool(rs.get("is_dull")),
+        "veto_chase": bool(struct.get("veto_chase")),
+        "struct_label": str(struct.get("label") or ""),
+        "rs_label": str(rs.get("label") or ""),
+        "rs_val": rs.get("rs"),
+    }
+
+
 def _score_buy_risk_for_code(
     code: str,
     asof: str,
@@ -6919,6 +7015,15 @@ def build_daily_short_picks(
     except Exception:
         pass
 
+    # P1：用预拉日K训练/加载短线 GBDT（次日+3日混合收益）
+    try:
+        bars_map = {
+            c: _get_risk_bars(c, asof, limit=28, fast_fetch=True) for c in codes
+        }
+        ensure_short_model(bars_map, retrain=True)
+    except Exception:
+        pass
+
     scored: List[Tuple[float, Dict[str, Any]]] = []
     for code, name, board, bscore, nh, titles in cand:
         q = qmap.get(code) or {}
@@ -7075,14 +7180,35 @@ def build_daily_short_picks(
             theme_grade=theme_grade,
         )
         risk_score = float(risk.get("风险值") or 0)
+        timing = _apply_forward_timing(
+            code=code,
+            asof=asof,
+            ohlc=ohlc,
+            pct=pct,
+            board_pct=board_pct,
+            risk_score=risk_score,
+            risk=risk,
+            buy_setup=setup,
+            method_setup=setup,
+        )
+        risk = timing["risk"]
+        risk_score = float(timing["risk_score"])
+        setup = timing["buy_setup"]
+        if timing["is_dull"] or (
+            timing["veto_chase"] and not setup.get("buy_ok")
+        ):
+            continue
         if risk_score < _RISK_HARD_REJECT:
             continue
         if risk_score < _RISK_BUY_FLOOR and kind not in (
             "t1_dip_hold",
             "true_pullback",
             "t1_resume",
+            "stabilize_up",
         ):
-            # 偏高风险：仅回踩类仍可进池标橙；连涨追高类直接跳过
+            # 偏高风险：仅回踩/止跌类仍可进池标橙；连涨追高类直接跳过
+            continue
+        if not setup.get("buy_ok"):
             continue
 
         total = (
@@ -7096,6 +7222,22 @@ def build_daily_short_picks(
             + (1.0 if (board_pct or 0) >= 1.0 else 0.0)
             + max(risk_score, -40.0) * 0.04
         )
+        # P1：GBDT 短线分融合排序
+        rs_val = timing.get("rs_val")
+        ml_pack = score_short_ml(
+            _get_risk_bars(code, asof, limit=28, fast_fetch=True),
+            live={
+                "board_pct": board_pct,
+                "rs": rs_val,
+                "flow": flow,
+                "news_hits": nh,
+                "risk_score": risk_score,
+                "mild_up_days": mild_days,
+            },
+        )
+        ml_score = float(ml_pack.get("ml_score") or 0.0)
+        factor_why = str(ml_pack.get("因子贡献") or "")
+        total = blend_short_rank(total, ml_score)
         sig, sig_lab = "红", str(setup.get("label") or "短线可买")
         if (
             total < 5.2
@@ -7105,13 +7247,26 @@ def build_daily_short_picks(
             sig, sig_lab = "橙", str(setup.get("label") or "贴近买点")
         if risk_score < _RISK_BUY_FLOOR:
             sig, sig_lab = "橙", f"高风险·{setup.get('label') or '回踩'}"
+        if ml_score <= -1.2:
+            sig, sig_lab = "橙", f"ML偏弱·{setup.get('label') or '观望'}"
 
         why_bits = [
             str(setup.get("why") or ""),
             f"风险值{risk_score:.0f}({risk.get('风险档')})",
+            f"ML{ml_score:+.2f}",
             f"现价{px:.2f}落在买点带{rng}",
             "持有预期1～3天",
         ]
+        if factor_why:
+            why_bits.append(factor_why)
+        if timing.get("struct_label"):
+            why_bits.append(f"盘口{timing['struct_label']}")
+        if timing.get("rs_label"):
+            rs_v = timing.get("rs_val")
+            why_bits.append(
+                f"相对强弱{timing['rs_label']}"
+                + (f"({rs_v:+.1f})" if rs_v is not None else "")
+            )
         if nh > 0:
             why_bits.insert(0, f"新闻命中{nh}条")
         elif board_pct is not None and board_pct >= 0.8:
@@ -7119,6 +7274,10 @@ def build_daily_short_picks(
         if flow is not None and flow > 0:
             why_bits.append(f"流入{flow:.1f}亿")
 
+        hold_cell = str(timing.get("hold_cell") or "")
+        rs_bit = ""
+        if timing.get("rs_val") is not None:
+            rs_bit = f" (vs板 {float(timing['rs_val']):+.1f})"
         row = {
             "信号色": sig,
             "信号": sig_lab,
@@ -7134,8 +7293,14 @@ def build_daily_short_picks(
             "风险值": risk_score,
             "风险档": risk.get("风险档"),
             "风险说明": risk.get("风险说明"),
+            "ML分": round(ml_score, 3),
+            "ML后端": ml_pack.get("backend"),
+            "因子贡献": factor_why,
             "操作建议": str(action),
-            "入选原因": f"{board}；" + "；".join([x for x in why_bits if x][:4]),
+            "持有出场": hold_cell,
+            "盘口结构": timing.get("struct_label") or "",
+            "相对强弱": timing.get("rs_label") or "",
+            "入选原因": f"{board}；" + "；".join([x for x in why_bits if x][:5]),
             "新闻摘录": "；".join(titles[:2]) if titles else "",
             "短线分": round(total, 2),
             "持有预期": "1～3天",
@@ -7146,6 +7311,12 @@ def build_daily_short_picks(
                 f"【买入方法】{buy_method}（多条件任一即可，贴价可成交）\n"
                 f"【风险值】{risk_score:.1f}（{risk.get('风险档')}）："
                 f"{risk.get('风险说明')}\n"
+                f"【ML分】{ml_score:+.3f}（{ml_pack.get('backend')}；"
+                f"标签=0.4×次日+0.6×三日收益）\n"
+                f"【因子贡献】{factor_why or '-'}\n"
+                f"【盘口结构】{timing.get('struct_label') or '-'}\n"
+                f"【相对强弱】{timing.get('rs_label') or '-'}{rs_bit}\n"
+                f"【持有出场】{hold_cell or '-'}\n"
                 f"【形态】{setup.get('label')} / {setup.get('kind')}\n"
                 f"【板块】{board}\n"
                 f"【原因】{'；'.join([x for x in why_bits if x])}\n"
@@ -7192,9 +7363,9 @@ def build_forward_watch(
             return fetch_forward_news(
                 finance_limit=30, tech_limit=30, pharma_limit=20, fast=True
             )
-    except Exception as exc:  # noqa: BLE001
-        err_parts.append(f"新闻:{exc}")
-    try:
+        except Exception as exc:  # noqa: BLE001
+            err_parts.append(f"新闻:{exc}")
+            try:
                 return fetch_hot_news(news_limit)
             except Exception as exc2:  # noqa: BLE001
                 err_parts.append(f"新闻兜底:{exc2}")
@@ -7203,8 +7374,8 @@ def build_forward_watch(
     def _load_boards() -> pd.DataFrame:
         try:
             return fetch_industry_boards(fast=True)
-    except Exception as exc:  # noqa: BLE001
-        err_parts.append(f"板块:{exc}")
+        except Exception as exc:  # noqa: BLE001
+            err_parts.append(f"板块:{exc}")
             return pd.DataFrame()
 
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -7755,9 +7926,28 @@ def build_forward_watch(
                 theme_grade=theme_grade,
             )
             risk_score = float(risk.get("风险值") or 0)
+            timing = _apply_forward_timing(
+                code=code,
+                asof=asof,
+                ohlc=ohlc,
+                pct=pct,
+                board_pct=board_pct,
+                risk_score=risk_score,
+                risk=risk,
+                buy_setup=buy_setup,
+                method_setup=method_setup,
+            )
+            risk = timing["risk"]
+            risk_score = float(timing["risk_score"])
+            buy_setup = timing["buy_setup"]
+            method_setup = timing["method_setup"]
+            # 时机否决后重算买点星展示痕迹（风险已改；星级不重跑全量以免抖动过大）
+            if timing["veto_chase"] and not buy_setup.get("buy_ok"):
+                buy_stars = min(int(buy_stars), 2)
             buy_ready = (
                 theme_ok
                 and not chase_reasons
+                and not timing["is_dull"]
                 and int(wave_stars) >= (2 if _is_short_setup else 3)
                 and int(buy_stars) >= 3
                 and (
@@ -7770,6 +7960,8 @@ def build_forward_watch(
             )
             # 硬风险：仍可留在观察池，但候选必须否、方法留空
             if risk_score < _RISK_HARD_REJECT:
+                buy_ready = False
+            if timing["veto_chase"] and timing.get("structure", {}).get("tag") == "rocket":
                 buy_ready = False
 
             buy_range, buy_action = _suggest_buy_plan(
@@ -7818,6 +8010,44 @@ def build_forward_watch(
                 f"【风险值】{risk_score:.1f}（{risk.get('风险档')}）："
                 f"{risk.get('风险说明')}"
                 )
+            if timing.get("struct_label"):
+                evidence.append(f"【盘口结构】{timing['struct_label']}")
+            if timing.get("rs_label"):
+                rs_v = timing.get("rs_val")
+                evidence.append(
+                    f"【相对强弱】{timing['rs_label']}"
+                    + (f"（vs板 {rs_v:+.1f}）" if rs_v is not None else "")
+                    + ("；板强个弱不作补涨买" if timing.get("is_dull") else "")
+                )
+            hold_cell = str(timing.get("hold_cell") or "")
+            if hold_cell:
+                evidence.append(f"【持有出场】{hold_cell}")
+            # P1：观察池也写 ML/因子贡献（排序仍以双星+风险为主）
+            try:
+                ml_pack = score_short_ml(
+                    _get_risk_bars(code, asof, limit=28, fast_fetch=True),
+                    live={
+                        "board_pct": board_pct,
+                        "rs": timing.get("rs_val"),
+                        "flow": stock_flow,
+                        "news_hits": len(news_hits or []),
+                        "risk_score": risk_score,
+                        "mild_up_days": mild_flow_days,
+                    },
+                )
+            except Exception:
+                ml_pack = {}
+            ml_score = ml_pack.get("ml_score")
+            factor_why = str(ml_pack.get("因子贡献") or "")
+            if ml_score is not None:
+                evidence.append(
+                    f"【ML分】{float(ml_score):+.3f}（{ml_pack.get('backend')}）"
+                )
+            if factor_why:
+                evidence.append(f"【因子贡献】{factor_why}")
+            if ml_score is not None and float(ml_score) <= -1.5:
+                buy_ready = False
+                buy_method = ""
             if news_hits:
                 evidence.append("【新闻】" + "；".join(news_hits[:3]))
             if theme_grade in ("偏弱", "走弱"):
@@ -7914,6 +8144,11 @@ def build_forward_watch(
                     "风险值": risk_score,
                     "风险档": risk.get("风险档"),
                     "风险说明": risk.get("风险说明"),
+                    "持有出场": hold_cell,
+                    "盘口结构": timing.get("struct_label") or "",
+                    "相对强弱": timing.get("rs_label") or "",
+                    "ML分": ml_score,
+                    "因子贡献": factor_why,
                     "概念": str(theme.get("_concept") or theme["name"]),
                     "行业": str(theme.get("_industry") or board_name or "-"),
                     "板块主题": str(theme.get("_concept") or theme["name"]),
@@ -8037,6 +8272,9 @@ def build_forward_watch(
             "双星：主线星=贴合热主线；买点星=时机。"
             "买入候选：短线形态主线星≥2且买点星≥3；否则主线星≥3。新进封顶3星。"
             "风险值∈[-100,100]：越负越不宜买。特变压舱不进短线池。"
+            "盘口用日K代理分时（直拉/冲高回落否决追买）；板强个弱降权；"
+            "持有出场参考峰值回撤/放量双阴/破MA20（V5规则）。"
+            "短线排序融合轻量GBDT（次日+3日收益）与因子贡献解释。"
         ),
     }
 

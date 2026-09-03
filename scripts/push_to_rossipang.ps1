@@ -1,13 +1,7 @@
-# Push this workspace to https://github.com/rossipang/Qbot-main (private).
-# GitHub no longer accepts account passwords for git/API — use a Personal Access Token.
-#
-# 1) Browser: https://github.com/settings/tokens  → Generate new token (classic)
-#    scopes: repo
-# 2) Browser: create empty private repo Qbot-main under rossipang (no README)
-#    https://github.com/new
-# 3) PowerShell:
-#    $env:GITHUB_TOKEN = 'ghp_xxxx'
-#    .\scripts\push_to_rossipang.ps1
+# Retry push when GitHub network works.
+# Usage:
+#   $env:GITHUB_TOKEN = 'ghp_xxx'
+#   .\scripts\push_to_rossipang.ps1
 
 param(
     [string]$RepoName = "Qbot-main",
@@ -30,15 +24,14 @@ $headers = @{
     "User-Agent"  = "Qbot-sync"
 }
 
-# Create private repo if missing
 try {
     Invoke-RestMethod -Uri "https://api.github.com/repos/$Owner/$RepoName" -Headers $headers -Method Get | Out-Null
     Write-Host "Repo exists: $Owner/$RepoName"
 } catch {
     $body = @{
-        name       = $RepoName
-        private    = $true
-        auto_init  = $false
+        name        = $RepoName
+        private     = $true
+        auto_init   = $false
         description = "Personal Qbot fork for home/office sync (not upstream)"
     } | ConvertTo-Json
     Invoke-RestMethod -Uri "https://api.github.com/user/repos" -Headers $headers -Method Post -Body $body -ContentType "application/json"
@@ -53,9 +46,11 @@ if ($remotes -match '^origin$') {
     git remote add origin $originUrl
 }
 
-# Push with token in URL once (not stored in gitconfig permanently beyond remote URL without token)
+$env:GIT_HTTP_LOW_SPEED_LIMIT = "1000"
+$env:GIT_HTTP_LOW_SPEED_TIME = "600"
 $pushUrl = "https://${Owner}:${Token}@github.com/${Owner}/${RepoName}.git"
 git push -u $pushUrl main
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 git remote set-url origin $originUrl
-Write-Host "Done. Clone at home: git clone $originUrl"
-Write-Host "Remote origin has NO token saved."
+Write-Host "Done. Home: git clone $originUrl"
+Write-Host "Remote origin has NO token saved. Revoke this PAT if it was pasted in chat."
