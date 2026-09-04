@@ -1,0 +1,21 @@
+---
+description: User "提交" means commit AND push to GitHub immediately
+alwaysApply: true
+---
+
+# 提交 = 提交并推送 GitHub
+
+用户说「提交」「提交一下」「提交改动代码」等，默认含义是：
+
+1. `git commit`（按既有 commit 规范）
+2. **立刻** `git push` 到 `origin`（当前分支，通常是 `main`）
+
+不要只 commit 不 push。本地提交对两地同步没有意义。
+
+## 推送注意
+
+- 目标远程：`https://github.com/rossipang/Qbot-main`（`origin`）
+- 普通快进优先：`git push -u origin HEAD`
+- 若因家里 force 过历史而拒绝：在确认本地已包含两边有效改动后，用 `git push --force-with-lease origin HEAD`，并告知用户已强推
+- 不要把密码写进 remote URL 长期保存；可用 `GITHUB_TOKEN` / `scripts/push_to_rossipang.ps1`
+- 刷新产生的 `forward_watch_*.json` / `intraday_watch.json` 缓存默认仍可不进 commit，除非用户明确要求一并提交
