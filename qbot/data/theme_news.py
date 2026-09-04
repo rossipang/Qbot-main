@@ -243,9 +243,13 @@ def fetch_cross_platform_theme_news(*, fast: bool = True) -> List[dict]:
             pass
     seen = set()
     out: List[dict] = []
+    from qbot.data.industry_screener import news_title_is_market_noise
+
     for r in rows:
         title = str(r.get("title") or "").strip()
         if not title or title in seen:
+            continue
+        if news_title_is_market_noise(title):
             continue
         if not within_lookback(str(r.get("time") or "")):
             continue

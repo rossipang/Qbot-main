@@ -301,6 +301,79 @@ _INDUSTRY_CATALYST_PATTERNS = (
     "CXO",
 )
 
+# 盘面走势/整点回顾类：无公司产业政策信息，一律丢掉
+_MARKET_NOISE_TITLE_PATTERNS = (
+    "整点回顾",
+    "盘面回顾",
+    "午评",
+    "早评",
+    "收评",
+    "尾盘回顾",
+    "早盘直击",
+    "午盘直击",
+    "盘中直击",
+    "行情综述",
+    "盘面扫描",
+    "盘面播报",
+    "涨多跌少",
+    "跌多涨少",
+    "个股依旧",
+    "超三千股",
+    "超3100股",
+    "沪深京三市",
+    "沪深两市",
+    "两市成交",
+    "三市成交",
+    "成交达",
+    "成交额突破",
+    "较上日此时",
+    "较上一交易日此时",
+    "半日成交",
+    "全市场涨跌",
+    "指数涨跌互现",
+    "市场午后",
+    "市场早盘",
+    "市场午盘",
+    "市场收盘",
+    "A股午后",
+    "A股早盘",
+    "A股午盘",
+    "A股收盘",
+    "双双翻绿",
+    "双双翻红",
+    "集体翻绿",
+    "飘红超",
+    "飘绿超",
+)
+
+
+def news_title_is_market_noise(title: str) -> bool:
+    """盘面走势播报/整点回顾：不是公司·产业·政策实讯。"""
+    t = str(title or "").strip()
+    if not t:
+        return True
+    if any(k in t for k in _MARKET_NOISE_TITLE_PATTERNS):
+        return True
+    # 「深成指/创业板指/科创50 + 跌超/涨超 + 方向跌幅居前」类纯指数播报
+    index_hit = sum(
+        1
+        for k in (
+            "深成指",
+            "创业板指",
+            "科创50",
+            "上证指数",
+            "沪指",
+            "深指",
+            "北证50",
+        )
+        if k in t
+    )
+    if index_hit >= 2 and any(
+        k in t for k in ("跌超", "涨超", "翻绿", "翻红", "震荡回落", "跌幅居前", "涨幅居前")
+    ):
+        return True
+    return False
+
 
 def news_title_is_industry_catalyst(title: str) -> bool:
     """英伟达CPO量产、光模块等产业催化。"""
@@ -323,7 +396,7 @@ def news_title_is_industry_catalyst(title: str) -> bool:
 def news_title_is_major_catalyst(title: str) -> bool:
     """判断标题是否像政策/重大投资/产业突发催化。"""
     t = str(title or "")
-    if not t:
+    if not t or news_title_is_market_noise(t):
         return False
     # 国常会/核准/发改委投资口径，单独即足够
     if any(k in t for k in ("国常会", "国务院常务会议", "核准", "发改委", "新型电网")):
@@ -507,7 +580,7 @@ def fetch_forward_news(
 
     def _keep_finance(title: str) -> bool:
         t = str(title or "")
-        if not t:
+        if not t or news_title_is_market_noise(t):
             return False
         if news_title_is_major_catalyst(t):
             return True
@@ -515,7 +588,7 @@ def fetch_forward_news(
 
     def _keep_tech(title: str) -> bool:
         t = str(title or "")
-        if not t:
+        if not t or news_title_is_market_noise(t):
             return False
         if news_title_is_industry_catalyst(t) or news_title_is_major_catalyst(t):
             return True
@@ -523,7 +596,7 @@ def fetch_forward_news(
 
     def _keep_pharma(title: str) -> bool:
         t = str(title or "")
-        if not t:
+        if not t or news_title_is_market_noise(t):
             return False
         if news_title_is_major_catalyst(t):
             return True
@@ -535,6 +608,8 @@ def fetch_forward_news(
         from qbot.data.theme_news import within_lookback
 
         df = pd.DataFrame(bucket).drop_duplicates(subset=["title"]).reset_index(drop=True)
+        # 先扔盘面播报
+        df = df[~df["title"].map(lambda x: news_title_is_market_noise(str(x or "")))].copy()
         # 近一周硬过滤：几个月前旧稿不当当日催化
         df = df[df["time"].map(lambda x: within_lookback(str(x or "")))].copy()
         if keep_fn is not None:
