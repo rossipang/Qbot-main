@@ -23,12 +23,14 @@ from qbot.gui.panels.panel_industry_screener import (
     _event_row,
     _fix_grid_viewport,
     _fmt,
+    _grid_viewport_height,
 )
 
 # 固定可视行数：多出的走表格内滚动，避免主题池把个股挤没
+# 个股观察池不锁高度，随窗口撑到页面底部
 _THEME_VISIBLE_ROWS = 8
 _SHORT_VISIBLE_ROWS = 6
-_STOCK_VISIBLE_ROWS = 16
+_STOCK_MIN_VISIBLE_ROWS = 6
 from qbot.gui.panels.panel_quote_detail import open_quote_detail
 
 # 个股表列序（改列时同步改这里，避免再把行业当成代码）
@@ -189,8 +191,8 @@ class ForwardWatchPanel(wx.Panel):
                 ("依据", 120),
             ]
         )
-        stock_sizer.Add(self.list_stocks, 0, wx.EXPAND | wx.ALL, 4)
-        _fix_grid_viewport(self.list_stocks, _STOCK_VISIBLE_ROWS)
+        stock_sizer.Add(self.list_stocks, 1, wx.EXPAND | wx.ALL, 4)
+        self.list_stocks.SetMaxSize((-1, -1))
         left.Add(stock_sizer, 1, wx.EXPAND | wx.ALL, 2)
         mid.Add(left, 3, wx.EXPAND)
 
@@ -242,6 +244,30 @@ class ForwardWatchPanel(wx.Panel):
         self.list_shorts.Bind(wx.grid.EVT_GRID_CELL_RIGHT_CLICK, self.on_short_click)
         self.list_shorts.Bind(wx.grid.EVT_GRID_CELL_LEFT_DCLICK, self.on_short_click)
 
+    def _stretch_stock_grid(self) -> None:
+        """个股观察池随面板高度向下撑满，不再锁死固定行数。"""
+        if not hasattr(self, "list_stocks"):
+            return
+        min_h = _grid_viewport_height(self.list_stocks, _STOCK_MIN_VISIBLE_ROWS)
+        target = min_h
+        try:
+            panel_h = self.GetClientSize().height
+            stock_y = self.list_stocks.GetScreenPosition().y - self.GetScreenPosition().y
+            avail = panel_h - stock_y - 8
+            if avail > min_h:
+                target = avail
+        except Exception:
+            pass
+        self.list_stocks.SetMinSize((-1, int(target)))
+        self.list_stocks.SetMaxSize((-1, -1))
+        try:
+            sz = self.list_stocks.GetContainingSizer()
+            if sz:
+                sz.Layout()
+            self.Layout()
+        except Exception:
+            pass
+
     def _on_size_fog(self, event):
         if event is not None:
             event.Skip()
@@ -253,6 +279,7 @@ class ForwardWatchPanel(wx.Panel):
             self.pnl_fog.SetPosition((0, top))
             self.pnl_fog.SetSize((max(1, w), max(1, h - top)))
             self.pnl_fog.Raise()
+        wx.CallAfter(self._stretch_stock_grid)
 
     def _clear_views(self):
         """清空列表，避免雾面下仍能瞥见旧数据。"""
@@ -637,6 +664,7 @@ class ForwardWatchPanel(wx.Panel):
         note = str(payload.get("note") or "")
         if note and not self.txt_reason.GetValue():
             self.txt_reason.SetValue(note)
+        wx.CallAfter(self._stretch_stock_grid)
 
     def _stock_from_row(self, row: int):
         if row is None or row < 0:

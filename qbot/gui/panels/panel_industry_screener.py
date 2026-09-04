@@ -485,7 +485,8 @@ class IndustryScreenerPanel(wx.Panel):
                 ("总市值(亿)", 80),
             ]
         )
-        _fix_grid_viewport(self.list_cons, LIST_VISIBLE_ROWS)
+        # 成分股不锁高度：随底栏剩余空间撑满，表格内滚动
+        self.list_cons.SetMaxSize((-1, -1))
         cons_sizer.Add(self.list_cons, 1, wx.EXPAND | wx.ALL, 4)
         bottom.Add(cons_sizer, 3, wx.EXPAND | wx.ALL, 2)
 
