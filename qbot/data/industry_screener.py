@@ -532,11 +532,16 @@ def fetch_forward_news(
     def _finalize(bucket: List[dict], keep_fn, limit: int) -> pd.DataFrame:
         if not bucket:
             return pd.DataFrame(columns=["time", "source", "title", "url", "channel"])
+        from qbot.data.theme_news import within_lookback
+
         df = pd.DataFrame(bucket).drop_duplicates(subset=["title"]).reset_index(drop=True)
-        df = df[df["title"].map(keep_fn)].copy()
+        # 近一周硬过滤：几个月前旧稿不当当日催化
+        df = df[df["time"].map(lambda x: within_lookback(str(x or "")))].copy()
+        if keep_fn is not None:
+            df = df[df["title"].map(keep_fn)].copy()
         if df.empty:
             return pd.DataFrame(columns=["time", "source", "title", "url", "channel"])
-        df["_ord"] = df["time"].astype(str).str.slice(0, 10)
+        df["_ord"] = df["time"].astype(str).str.slice(0, 16)
         df["_major"] = df["title"].map(
             lambda x: 1 if news_title_is_major_catalyst(x) else 0
         )
@@ -605,6 +610,15 @@ def fetch_forward_news(
     except Exception:
         pass
 
+    # —— 快讯通道（财联社+见闻等）：近一周实时催化，不过科技白名单 ——
+    flash_rows: List[dict] = []
+    try:
+        from qbot.data.theme_news import fetch_cross_platform_theme_news
+
+        flash_rows.extend(fetch_cross_platform_theme_news(fast=fast))
+    except Exception:
+        pass
+
     # —— 医药通道（搜索创新药/CXO等，补足财经+科技漏掉的医药催化）——
     pharma_kws = ("创新药", "医药", "CXO") if fast else ("创新药", "医药", "CXO", "医保", "生物医药")
     for kw in pharma_kws:
@@ -618,17 +632,24 @@ def fetch_forward_news(
     except Exception:
         pass
 
+    flash_limit = 25 if fast else 35
     fin_df = _finalize(finance_rows, _keep_finance, finance_limit)
     tech_df = _finalize(tech_rows, _keep_tech, tech_limit)
     pharma_df = _finalize(pharma_rows, _keep_pharma, pharma_limit)
-    frames = [d for d in (fin_df, tech_df, pharma_df) if d is not None and not d.empty]
+    # 快讯：只做近一周过滤，不套科技关键词白名单
+    flash_df = _finalize(flash_rows, None, flash_limit)
+    frames = [
+        d
+        for d in (flash_df, fin_df, tech_df, pharma_df)
+        if d is not None and not d.empty
+    ]
     if not frames:
         return pd.DataFrame(columns=["time", "source", "title", "url", "channel"])
     out = pd.concat(frames, ignore_index=True)
     out = out.drop_duplicates(subset=["title"]).reset_index(drop=True)
     # 合并后再按催化优先，但保留各通道初筛结果
     out["_major"] = out["title"].map(lambda x: 1 if news_title_is_major_catalyst(x) else 0)
-    out["_ord"] = out["time"].astype(str).str.slice(0, 10)
+    out["_ord"] = out["time"].astype(str).str.slice(0, 16)
     out = out.sort_values(["_major", "_ord"], ascending=[False, False]).drop(
         columns=["_major", "_ord"]
     )

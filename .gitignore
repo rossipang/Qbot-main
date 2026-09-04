@@ -139,6 +139,8 @@ jqdata.json
 pytrader.db
 account.json
 *.log
+qbot-log.txt
+_tmp_*
 qbot/gui/__pycache__/
 qbot/gui/bkt_result/
 # 行情缓存默认忽略；前瞻推荐结果强制入库方便两地同步
@@ -146,6 +148,8 @@ qbot/gui/csv/*
 !qbot/gui/csv/forward_watch_latest.json
 !qbot/gui/csv/forward_watch_history.json
 !qbot/gui/csv/intraday_watch.json
+!qbot/gui/csv/daily_news_digest.json
+!qbot/gui/csv/daily_news_digest.html
 
 pytrader/user_config.sh
 *.parquet

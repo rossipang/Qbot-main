@@ -6,6 +6,7 @@ import wx
 
 from qbot.gui.elements.def_dialog import ParamsConfigDialog
 from qbot.gui.panels.panel_backtest import PanelBacktest
+from qbot.gui.panels.panel_daily_news import DailyNewsPanel
 from qbot.gui.panels.panel_forward_watch import ForwardWatchPanel
 from qbot.gui.panels.panel_intraday_watch import IntradayWatchPanel
 from qbot.gui.panels.panel_industry_screener import IndustryScreenerPanel
@@ -140,6 +141,9 @@ class MainFrame(wx.Frame):
         # 本地行业选股：新闻 → 板块资金/估值 → 成分股 → 选股名单
         self.tabs.AddPage(IndustryScreenerPanel(self.tabs), "行业选股", True)
 
+        # 每日新闻大事：近3天重点快讯分栏 + 相关板块利好/利空客观分析（启动自动刷）
+        self.tabs.AddPage(DailyNewsPanel(self.tabs), "每日新闻大事", True)
+
         # 前瞻观察：新闻+板块资金 → 主题/个股观察池 → 连日升级与星级
         self.tabs.AddPage(ForwardWatchPanel(self.tabs), "前瞻观察", True)
 
@@ -162,5 +166,5 @@ class MainFrame(wx.Frame):
         # self.tabs.AddPage(ActionsPanel(self.tabs), "资产轮动策略分析", True)
         self.tabs.AddPage(TradePanel(self.tabs), "在线交易(实盘/虚拟盘)", True)
 
-        # 0智库 1Cursor策略 2AI选股 3行业选股 4前瞻观察 5今日盯盘 6基金 7回测 8交易
-        self.tabs.SetSelection(7)  # 可视化股票/基金回测系统 as hometab
+        # 0智库 1Cursor策略 2AI选股 3行业选股 4每日新闻 5前瞻 6盯盘 7基金 8回测 9交易
+        self.tabs.SetSelection(8)  # 可视化股票/基金回测系统 as hometab
