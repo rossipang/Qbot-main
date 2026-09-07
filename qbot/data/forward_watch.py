@@ -7070,12 +7070,12 @@ def build_daily_short_picks(
     except Exception:
         pass
 
-    # P1：用预拉日K训练/加载短线 GBDT（次日+3日混合收益）
+    # P1：加载夜间扩宇宙 GBDT；禁止用短池几十只×短窗口覆盖大模型
     try:
         bars_map = {
-            c: _get_risk_bars(c, asof, limit=28, fast_fetch=True) for c in codes
+            c: _get_risk_bars(c, asof, limit=90, fast_fetch=True) for c in codes
         }
-        ensure_short_model(bars_map, retrain=True)
+        ensure_short_model(bars_map, retrain=False)
     except Exception:
         pass
 
@@ -7289,7 +7289,7 @@ def build_daily_short_picks(
         # P1：GBDT 短线分融合排序（ML 权重大，拉开先后）
         rs_val = timing.get("rs_val")
         ml_pack = score_short_ml(
-            _get_risk_bars(code, asof, limit=28, fast_fetch=True),
+            _get_risk_bars(code, asof, limit=90, fast_fetch=True),
             live={
                 "board_pct": board_pct,
                 "rs": rs_val,
@@ -7298,6 +7298,7 @@ def build_daily_short_picks(
                 "risk_score": risk_score,
                 "mild_up_days": mild_days,
             },
+            code=code,
         )
         ml_score = float(ml_pack.get("ml_score") or 0.0)
         factor_why = str(ml_pack.get("因子贡献") or "")
@@ -8092,10 +8093,10 @@ def build_forward_watch(
             hold_cell = str(timing.get("hold_cell") or "")
             if hold_cell:
                 evidence.append(f"【持有出场】{hold_cell}")
-            # P1：观察池也写 ML/因子贡献（排序仍以双星+风险为主）
+            # P1：观察池写 ML/因子贡献；ML 只作客观分与软降权，不作硬否决
             try:
                 ml_pack = score_short_ml(
-                    _get_risk_bars(code, asof, limit=28, fast_fetch=True),
+                    _get_risk_bars(code, asof, limit=90, fast_fetch=True),
                     live={
                         "board_pct": board_pct,
                         "rs": timing.get("rs_val"),
@@ -8104,6 +8105,7 @@ def build_forward_watch(
                         "risk_score": risk_score,
                         "mild_up_days": mild_flow_days,
                     },
+                    code=code,
                 )
             except Exception:
                 ml_pack = {}
@@ -8115,9 +8117,11 @@ def build_forward_watch(
                 )
             if factor_why:
                 evidence.append(f"【因子贡献】{factor_why}")
-            if ml_score is not None and float(ml_score) <= -1.5:
-                buy_ready = False
-                buy_method = ""
+            # 与短池一致：ML 偏弱仅提示，不撤买入候选（硬门槛留给涨停/作废线等）
+            if ml_score is not None and float(ml_score) <= -1.2:
+                evidence.append(
+                    f"【ML偏弱】{float(ml_score):+.2f}，降权观察，不否决 D/E 候选"
+                )
             if news_hits:
                 evidence.append("【新闻】" + "；".join(news_hits[:3]))
             if theme_grade in ("偏弱", "走弱"):
