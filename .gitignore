@@ -150,6 +150,9 @@ qbot/gui/csv/*
 !qbot/gui/csv/intraday_watch.json
 !qbot/gui/csv/daily_news_digest.json
 !qbot/gui/csv/daily_news_digest.html
+!qbot/gui/csv/forward_short_gbdt.joblib
+!qbot/gui/csv/forward_short_gbdt_meta.json
+!qbot/gui/csv/forward_ml_index_510300.json
 
 pytrader/user_config.sh
 *.parquet
