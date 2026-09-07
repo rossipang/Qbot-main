@@ -321,13 +321,29 @@ def _build_fund_flow_plots(
         factors = ff["date_str"].tolist()
         shared_x = FactorRange(factors=list(factors))
         src = ColumnDataSource(ff)
+        src_tag = str(getattr(fund_flow, "attrs", {}).get("source") or "")
+        if src_tag == "sina+em_delay":
+            span_note = " · 新浪30日+东财今日细分"
+        elif src_tag == "sina":
+            span_note = " · 新浪口径"
+        elif src_tag.startswith("eastmoney") or src_tag in ("efinance", "akshare"):
+            span_note = " · 东财口径"
+        else:
+            span_note = f" · {src_tag}" if src_tag else ""
+        if getattr(fund_flow, "attrs", {}).get("em_today_overlay"):
+            # 已在上面标过组合口径
+            pass
 
         p_k = _fund_kline_plot(kline, factors, shared_x)
         if p_k is not None:
+            if span_note:
+                p_k.title.text = f"近{len(factors)}日K线{span_note}"
+            elif len(factors) > 0:
+                p_k.title.text = f"近{len(factors)}日K线"
             plots.append(p_k)
 
         p_main = _flow_figure(
-            "资金流向分析（近30日）- 主力净流入(亿元)（超大单+大单）",
+            f"资金流向分析（近{len(factors)}日{span_note}）- 主力净流入(亿元)（超大单+大单）",
             shared_x,
             200,
             y_range=_yi_range(ff["main_net_yi"]),
@@ -358,71 +374,112 @@ def _build_fund_flow_plots(
         plots.append(p_main)
 
         part_cols = ["super_net_yi", "large_net_yi", "mid_net_yi", "retail_net_yi"]
-        p_parts = _flow_figure(
-            "资金流向细分（近30日）- 超大单 / 大单 / 中单 / 散户(小单) 净流入(亿元)",
-            shared_x,
-            240,
-            y_range=_yi_range(*[ff[c] for c in part_cols if c in ff.columns]),
-        )
+        parts_approx = bool(getattr(fund_flow, "attrs", {}).get("parts_approx"))
+        # 跳过全程≈0 的系列（新浪常缺中单/小单），避免全挤在 0 轴像「十字星」
+        active_parts = []
         for col, color, label in [
             ("super_net_yi", "#c0392b", "超大单"),
-            ("large_net_yi", "#e67e22", "大单"),
+            ("large_net_yi", "#e67e22", "大单" + ("≈主力−超大" if parts_approx else "")),
             ("mid_net_yi", "#27ae60", "中单"),
             ("retail_net_yi", "#2980b9", "散户(小单)"),
         ]:
+            if col not in ff.columns:
+                continue
+            s = pd.to_numeric(ff[col], errors="coerce").fillna(0.0)
+            if float(s.abs().max()) < 1e-6:
+                continue
+            active_parts.append((col, color, label))
+        parts_title = (
+            f"资金流向细分（近{len(factors)}日{span_note}）- "
+            + (" / ".join(lb for _, _, lb in active_parts) if active_parts else "暂无细分")
+            + ("（亿元）" if active_parts else "")
+        )
+        if parts_approx:
+            parts_title += " · 新浪缺中/小单明细"
+        p_parts = _flow_figure(
+            parts_title,
+            shared_x,
+            240,
+            y_range=_yi_range(*[ff[c] for c, _, _ in active_parts]) if active_parts else _yi_range(ff.get("main_net_yi")),
+        )
+        for col, color, label in active_parts:
             p_parts.line(
                 x="date_str",
                 y=col,
                 source=src,
                 line_color=color,
-                line_width=1.8 if col != "retail_net_yi" else 2.0,
+                line_width=2.0,
                 legend_label=label,
             )
-        p_parts.add_layout(Span(location=0, dimension="width", line_color="#666", line_width=1))
-        p_parts.add_tools(
-            HoverTool(
-                tooltips=[
-                    ("日期", "@date_str"),
-                    ("超大单(亿)", "@super_net_yi{0.00}"),
-                    ("大单(亿)", "@large_net_yi{0.00}"),
-                    ("中单(亿)", "@mid_net_yi{0.00}"),
-                    ("散户小单(亿)", "@retail_net_yi{0.00}"),
-                ]
+            p_parts.circle(
+                x="date_str",
+                y=col,
+                source=src,
+                size=5,
+                fill_color=color,
+                line_color=color,
+                legend_label=label,
             )
-        )
+        if not active_parts:
+            p_parts.title.text = (
+                f"资金流向细分（近{len(factors)}日{span_note}）暂无超大/大/中/小单明细"
+            )
+        p_parts.add_layout(Span(location=0, dimension="width", line_color="#666", line_width=1))
+        hover_parts = [("日期", "@date_str")]
+        for col, _, label in active_parts:
+            hover_parts.append((f"{label}(亿)", f"@{col}{{0.00}}"))
+        if not hover_parts[1:]:
+            hover_parts.append(("提示", "当前数据源无细分字段"))
+        p_parts.add_tools(HoverTool(tooltips=hover_parts))
         p_parts.legend.location = "top_left"
         p_parts.legend.click_policy = "hide"
         plots.append(p_parts)
 
-        p_retail = _flow_figure(
-            "散户资金（近30日）- 小单净流入(亿元) 与累计",
-            shared_x,
-            180,
-            y_range=_yi_range(ff["retail_net_yi"]),
-        )
-        p_retail.vbar(
-            x="date_str",
-            width=0.7,
-            top="retail_net_yi",
-            fill_color="retail_color",
-            line_color="retail_color",
-            source=src,
-            legend_label="散户净流入",
-        )
-        _attach_cum_axis(p_retail, src, "date_str", "retail_cum_yi", "#8e44ad", "散户累计")
-        p_retail.add_layout(Span(location=0, dimension="width", line_color="#666", line_width=1))
-        p_retail.add_tools(
-            HoverTool(
-                tooltips=[
-                    ("日期", "@date_str"),
-                    ("散户净流入(亿)", "@retail_net_yi{0.00}"),
-                    ("散户累计(亿)", "@retail_cum_yi{0.00}"),
-                ]
+        # 散户图：全程为 0 时不强行画空柱
+        retail_abs = float(pd.to_numeric(ff["retail_net_yi"], errors="coerce").fillna(0).abs().max())
+        if retail_abs >= 1e-6:
+            p_retail = _flow_figure(
+                f"散户资金（近{len(factors)}日{span_note}）- 小单净流入(亿元) 与累计",
+                shared_x,
+                180,
+                y_range=_yi_range(ff["retail_net_yi"]),
             )
-        )
-        p_retail.legend.location = "top_left"
-        p_retail.legend.click_policy = "hide"
-        plots.append(p_retail)
+            p_retail.vbar(
+                x="date_str",
+                width=0.7,
+                top="retail_net_yi",
+                fill_color="retail_color",
+                line_color="retail_color",
+                source=src,
+                legend_label="散户净流入",
+            )
+            _attach_cum_axis(p_retail, src, "date_str", "retail_cum_yi", "#8e44ad", "散户累计")
+            p_retail.add_layout(Span(location=0, dimension="width", line_color="#666", line_width=1))
+            p_retail.add_tools(
+                HoverTool(
+                    tooltips=[
+                        ("日期", "@date_str"),
+                        ("散户净流入(亿)", "@retail_net_yi{0.00}"),
+                        ("散户累计(亿)", "@retail_cum_yi{0.00}"),
+                    ]
+                )
+            )
+            p_retail.legend.location = "top_left"
+            p_retail.legend.click_policy = "hide"
+            plots.append(p_retail)
+        elif src_tag == "sina":
+            plots.append(
+                Div(
+                    text=(
+                        "<div style='padding:8px;color:#666;background:#fafafa;"
+                        "border:1px solid #eee;'>"
+                        "散户/中单：新浪近30日接口未返回明细；上面细分以超大单 + 大单(≈主力−超大)为主。"
+                        "主力净流入柱图仍可用。</div>"
+                    ),
+                    width=1100,
+                    height=36,
+                )
+            )
     else:
         # 无资金流时仍尽量展示近30日K
         if kline is not None and not getattr(kline, "empty", True):

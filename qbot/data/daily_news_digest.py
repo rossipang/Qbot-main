@@ -144,18 +144,125 @@ _STANCE_SCORE = {
     "利空": -2.0,
 }
 
+# 硬利空：命中即不得标成利好/中性偏多（避免「跌停+新高误匹配」类反标）
+_HARD_BEAR = (
+    "跌停",
+    "暴跌",
+    "闪崩",
+    "崩盘",
+    "立案",
+    "退市",
+    "净流出",
+    "不及预期",
+    "下调评级",
+    "指引下调",
+    "业绩变脸",
+    "预亏",
+    "巨亏",
+    "爆雷",
+    "造假",
+    "处罚",
+    "违约",
+    "裁员",
+    "终止收购",
+    "终止重大资产",
+    "无订单",
+    "尚未形成订单",
+    "暂未形成订单",
+    "提示风险",
+    "风险提示",
+    "注意风险",
+    "创上市以来新低",
+    "创历史新低",
+    "阶段新低",
+    "新低",
+)
+
+# 硬利好：无硬利空并存时，可直接偏多
+_HARD_BULL = (
+    "超预期",
+    "获批上市",
+    "新药获批",
+    "药品获批",
+    "器械获批",
+    "指引上调",
+    "上调评级",
+    "首次覆盖",
+    "创历史新高",
+    "量产",
+    "中标",
+    "扩产",
+)
+
 _BULL = (
-    "超预期", "大涨", "涨停", "创历史新高", "新高", "获批", "订单", "放量",
-    "涨价", "突破", "上调", "指引上调", "净利增", "营收增", "收购", "合作",
-    "量产", "交付", "中标", "扩产", "流入", "景气", "利好", "签署", "中标",
+    "超预期",
+    "大涨",
+    "创历史新高",
+    "阶段新高",
+    "获批",
+    "放量",
+    "涨价",
+    "突破",
+    "上调",
+    "指引上调",
+    "净利增",
+    "营收增",
+    "收购",
+    "合作",
+    "量产",
+    "交付",
+    "中标",
+    "扩产",
+    "景气",
+    "利好",
+    "签署",
+    "订单",
 )
 _BEAR = (
-    "不及预期", "下调", "减持", "质押", "亏损", "跌停", "暴跌", "核查",
-    "立案", "警示", "风险提示", "澄清", "尚未形成", "无订单", "终止",
-    "推迟", "裁员", "违约", "处罚", "退市", "利空", "净流出",
+    "不及预期",
+    "下调",
+    "减持",
+    "质押",
+    "亏损",
+    "跌停",
+    "暴跌",
+    "核查",
+    "立案",
+    "警示",
+    "风险提示",
+    "提示风险",
+    "澄清",
+    "尚未形成",
+    "无订单",
+    "终止",
+    "推迟",
+    "裁员",
+    "违约",
+    "处罚",
+    "退市",
+    "利空",
+    "净流出",
+    "新低",
+    "预亏",
+    "爆雷",
 )
 _NOISE = (
-    "官方售价", "贴水", "溢价", "LME期", "抵押贷款利率", "酒类广告",
+    "官方售价",
+    "贴水",
+    "溢价",
+    "LME期",
+    "抵押贷款利率",
+    "酒类广告",
+)
+
+# 子串伪阳性：出现否定式时，不计对应利好词
+_BULL_NEGATIONS = (
+    ("订单", ("无订单", "尚未形成订单", "暂未形成订单", "没有订单", "未获订单")),
+    ("收购", ("终止收购", "取消收购", "收购失败", "未披露收购")),
+    ("合作", ("终止合作", "取消合作")),
+    ("上调", ("不及预期", "下调")),
+    ("获批", ("未获批", "不予批准", "获批立项", "获批编制")),
+    ("大涨", ("最大涨幅", "涨幅居", "涨幅靠")),
 )
 
 
@@ -182,20 +289,70 @@ def _related_boards(title: str) -> List[str]:
     return out
 
 
+def _count_stance_hits(title: str) -> Tuple[int, int]:
+    """统计多空词，处理否定式与涨停/跌停并存。"""
+    t = str(title or "")
+    bull = 0
+    for k in _BULL:
+        if k not in t:
+            continue
+        negated = False
+        for pos, negs in _BULL_NEGATIONS:
+            if k == pos and any(n in t for n in negs):
+                negated = True
+                break
+        # 「新高」不得在「新低」标题里误计；已用独立词，这里防「历史新高」残留
+        if k in ("创历史新高", "阶段新高") and "新低" in t:
+            negated = True
+        if not negated:
+            bull += 1
+    bear = sum(1 for k in _BEAR if k in t)
+    # 涨停单独出现且夹带风险/澄清/跌停 → 不计多，并加强空
+    if "涨停" in t:
+        if any(k in t for k in ("跌停", "提示风险", "风险提示", "澄清", "立案", "亏损")):
+            bear += 1
+        else:
+            # 纯涨停偏弱多，最多 +1，避免盘面词主导
+            bull += 1
+    return bull, bear
+
+
 def _stance(title: str) -> Tuple[str, str]:
     """客观多空：利好 / 利空 / 中性偏多 / 中性偏空 / 中性。"""
     t = str(title or "")
-    bull = sum(1 for k in _BULL if k in t)
-    bear = sum(1 for k in _BEAR if k in t)
-    # 澄清「尚未形成订单」类偏利空（情绪票）
+    hard_bear = [k for k in _HARD_BEAR if k in t]
+    hard_bull = [k for k in _HARD_BULL if k in t]
+    # 硬利空优先：跌停/立案/新低/无订单等绝不能标成利好
+    if hard_bear:
+        # 仅当硬利好多且无跌停/立案/新低等极端词时，才允许对冲为中性
+        extreme = any(
+            k in t
+            for k in (
+                "跌停",
+                "暴跌",
+                "立案",
+                "退市",
+                "新低",
+                "无订单",
+                "终止收购",
+                "提示风险",
+                "风险提示",
+            )
+        )
+        if extreme or not hard_bull:
+            why = f"标题含硬利空（{'/'.join(hard_bear[:3])}），不作利好"
+            if len(hard_bear) >= 2 or extreme:
+                return "利空", why
+            return "中性偏空", why
+    bull, bear = _count_stance_hits(t)
     if any(k in t for k in ("尚未形成", "暂未形成", "未对公司", "注意风险")):
         bear += 2
+    if hard_bull and not hard_bear and bull >= bear:
+        return "利好", f"标题含硬利好（{'/'.join(hard_bull[:3])}）"
     if bull > bear + 1:
-        why = "标题含超预期/订单/新高/放量等偏多表述"
-        return "利好", why
+        return "利好", "标题含超预期/获批/量产等偏多表述"
     if bear > bull + 1:
-        why = "标题含不及预期/减持/澄清无订单/风险提示等偏空表述"
-        return "利空", why
+        return "利空", "标题含不及预期/减持/澄清无订单/风险提示等偏空表述"
     if bull > bear:
         return "中性偏多", "多空并存，偏多措辞略多"
     if bear > bull:
@@ -531,12 +688,14 @@ def _stocks_for_board_summary(
     titles: List[Any],
     *,
     limit: int = 3,
+    prefer_stance: str = "",
 ) -> Tuple[List[Dict[str, str]], List[str]]:
     """返回 (强相关个股, 对应新闻标题)。
     个股按点名强度 TopN；新闻只保留支撑这些个股的标题，一一对应，不另拼无关快讯。
-    整板块都没点名时，个股退回中军，新闻取重要分最高的几条。"""
+    整板块都没点名时，个股退回中军，新闻取重要分最高的几条。
+    prefer_stance：板块净多空，优先展示同向标题，避免「利好板」挂跌停稿。"""
     limit = max(1, min(int(limit), 3))
-    rows: List[Tuple[str, float]] = []
+    rows: List[Tuple[str, float, str]] = []
     for raw in titles or []:
         if isinstance(raw, dict):
             title = str(raw.get("title") or raw.get("标题") or "").strip()
@@ -544,21 +703,48 @@ def _stocks_for_board_summary(
                 imp = float(raw.get("imp") or raw.get("重要分") or 0)
             except (TypeError, ValueError):
                 imp = 0.0
+            st = str(raw.get("stance") or raw.get("多空") or "")
         else:
             title = str(raw or "").strip()
             imp = 0.0
+            st = ""
         if title:
-            rows.append((title, imp))
+            rows.append((title, imp, st))
+
+    def _stance_align_bonus(st: str) -> float:
+        pref = str(prefer_stance or "")
+        if not pref or not st:
+            return 0.0
+        if pref == "利好":
+            if st == "利好":
+                return 8.0
+            if st == "中性偏多":
+                return 4.0
+            if st in ("利空", "中性偏空"):
+                return -20.0
+        if pref == "利空":
+            if st == "利空":
+                return 8.0
+            if st == "中性偏空":
+                return 4.0
+            if st in ("利好", "中性偏多"):
+                return -20.0
+        if pref == "中性偏多" and st in ("利空",):
+            return -12.0
+        if pref == "中性偏空" and st in ("利好",):
+            return -12.0
+        return 0.0
 
     soft_noise = ("互动平台", "互动表示", "投资者关系", "截至发稿")
     best: Dict[str, Dict[str, Any]] = {}
-    for title, imp in rows:
+    for title, imp, st in rows:
         soft = any(k in title for k in soft_noise)
         for hit in _extract_title_mentions(title, keep_score=True):
             code = str(hit.get("代码") or "").zfill(6)[-6:]
             if not code or not _is_a_share_code(code):
                 continue
             score = int(hit.get("_score") or 0) + min(imp, 5.0) * 2.0
+            score += _stance_align_bonus(st)
             if soft:
                 score -= 25
             prev = best.get(code)
@@ -572,6 +758,19 @@ def _stocks_for_board_summary(
             }
 
     ranked = sorted(best.values(), key=lambda x: -float(x.get("_score") or 0))
+    # 丢掉明显反标的点名稿（利好板挂跌停）
+    if prefer_stance in ("利好", "中性偏多"):
+        ranked = [
+            r
+            for r in ranked
+            if not any(k in str(r.get("_title") or "") for k in ("跌停", "暴跌", "新低", "立案"))
+        ] or ranked
+    if prefer_stance in ("利空", "中性偏空"):
+        ranked = [
+            r
+            for r in ranked
+            if not any(k in str(r.get("_title") or "") for k in ("获批上市", "创历史新高"))
+        ] or ranked
     picked = ranked[:limit]
     if picked:
         stocks = [{"代码": r["代码"], "名称": r["名称"]} for r in picked]
@@ -584,10 +783,28 @@ def _stocks_for_board_summary(
                 headlines.append(h)
         return stocks, headlines
 
-    # 无点名：中军 + 按重要分取新闻（稳定排序，避免每次乱拼）
+    # 无点名：中军 + 按重要分取新闻（同向优先）
     seeds = _seeds_for_board(board, limit=limit)
-    rows_sorted = sorted(rows, key=lambda x: -x[1])
-    headlines = [t[:120] for t, _imp in rows_sorted[:limit]]
+    rows_sorted = sorted(
+        rows,
+        key=lambda x: (-(_stance_align_bonus(x[2]) + x[1]),),
+    )
+    if prefer_stance in ("利好", "中性偏多"):
+        aligned = [
+            (t, imp, st)
+            for t, imp, st in rows_sorted
+            if st not in ("利空", "中性偏空")
+            and not any(k in t for k in ("跌停", "暴跌", "新低", "立案"))
+        ]
+        rows_sorted = aligned or rows_sorted
+    if prefer_stance in ("利空", "中性偏空"):
+        aligned = [
+            (t, imp, st)
+            for t, imp, st in rows_sorted
+            if st not in ("利好", "中性偏多")
+        ]
+        rows_sorted = aligned or rows_sorted
+    headlines = [t[:120] for t, _imp, _st in rows_sorted[:limit]]
     return seeds, headlines
 
 
@@ -645,7 +862,10 @@ def _build_board_summary(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for board, b in buckets.items():
         net = _net_stance_label(float(b["score"]), int(b["bull_n"]), int(b["bear_n"]))
         stocks, headlines = _stocks_for_board_summary(
-            board, list(b.get("titles") or []), limit=3
+            board,
+            list(b.get("titles") or []),
+            limit=3,
+            prefer_stance=net,
         )
         stock_txt = "、".join(f"{s['名称']}({s['代码']})" for s in stocks) if stocks else "—"
         rows.append(

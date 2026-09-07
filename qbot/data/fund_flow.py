@@ -16,11 +16,16 @@ from qbot.data.eastmoney_quote import (
     to_secid,
 )
 
-# 历史日 K 资金流：push2his 才有完整序列；push2delay 常只给 1 日，仅作兜底
+# 历史日 K 资金流：push2his 才有完整多日细分；本机常被 RST 掐断。
+# push2delay 通，但通常只给 1 日（完整超大/大/中/小单）。
+# 腾讯：历史资金 Controller 已下线；qt.gtimg.cn/q=ff_ 现返回 none_match。
+# 因此多日序列常走新浪；一旦东财 his 恢复，仍最优先东财完整细分。
 FFLOW_HIS_URLS = (
     "https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get",
     "https://90.push2his.eastmoney.com/api/qt/stock/fflow/daykline/get",
     "https://82.push2his.eastmoney.com/api/qt/stock/fflow/daykline/get",
+    "https://46.push2his.eastmoney.com/api/qt/stock/fflow/daykline/get",
+    "https://77.push2his.eastmoney.com/api/qt/stock/fflow/daykline/get",
 )
 FFLOW_DELAY_URL = "https://push2delay.eastmoney.com/api/qt/stock/fflow/daykline/get"
 MIN_USEFUL_KLINES = 5
@@ -28,6 +33,13 @@ MIN_USEFUL_KLINES = 5
 DEFAULT_LOOKBACK_DAYS = 30
 
 NORTHBOUND_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+# 新浪近 N 日个股资金流向（东财 his 失败 / delay 仅 1 日时的回退）
+SINA_MONEYFLOW_URL = (
+    "https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+    "MoneyFlow.ssl_qsfx_zjlrqs"
+)
+# 腾讯实时资金（旧接口；2026 起多数标的返回 none_match，仅作探测）
+TENCENT_FF_URL = "https://qt.gtimg.cn/q=ff_{market}{symbol}"
 
 
 def _fflow_sessions() -> list:
@@ -93,6 +105,11 @@ def _finalize_fund_flow(
         return out
     out["main_cum_yi"] = out["main_net_yi"].cumsum()
     out["retail_cum_yi"] = out["retail_net_yi"].cumsum()
+    # 保留上游口径标记（新浪/东财、细分是否近似）
+    try:
+        out.attrs.update(getattr(df, "attrs", {}) or {})
+    except Exception:
+        pass
     return out
 
 
@@ -104,6 +121,7 @@ def _request_fflow_klines(
     lmt: int = DEFAULT_LOOKBACK_DAYS,
 ) -> Tuple[list, dict]:
     params = {
+        # lmt=0 在部分环境表示不截断；多日历史优先尽量要满
         "lmt": str(max(int(lmt), 0)),
         "klt": "101",
         "fields1": "f1,f2,f3,f7",
@@ -115,6 +133,7 @@ def _request_fflow_klines(
     headers = {
         "User-Agent": REQUEST_HEADERS["User-Agent"],
         "Referer": "https://data.eastmoney.com/zjlx/",
+        "Origin": "https://data.eastmoney.com",
         "Accept": "*/*",
     }
     resp = session.get(url, params=params, headers=headers, timeout=timeout)
@@ -122,6 +141,56 @@ def _request_fflow_klines(
     payload = resp.json() or {}
     klines = ((payload.get("data") or {}).get("klines") or [])
     return klines, payload
+
+
+def _overlay_em_day(
+    base: pd.DataFrame, em_day: pd.DataFrame, *, tag: str = "sina+em_delay"
+) -> pd.DataFrame:
+    """用东财单日完整细分覆盖同日期行（新浪缺中/小单时补今日真值）。"""
+    if base is None or base.empty or em_day is None or em_day.empty:
+        return base
+    out = base.copy()
+    em = em_day.copy()
+    em["date"] = pd.to_datetime(em["date"]).dt.normalize()
+    out["date"] = pd.to_datetime(out["date"]).dt.normalize()
+    cols = [
+        "main_net",
+        "retail_net",
+        "mid_net",
+        "large_net",
+        "super_net",
+        "main_net_yi",
+        "retail_net_yi",
+        "mid_net_yi",
+        "large_net_yi",
+        "super_net_yi",
+        "main_pct",
+        "retail_pct",
+    ]
+    for _, row in em.iterrows():
+        d = row["date"]
+        mask = out["date"] == d
+        if not mask.any():
+            # 东财有、底表无：追加一行
+            out = pd.concat([out, pd.DataFrame([row])], ignore_index=True)
+            continue
+        for c in cols:
+            if c in out.columns and c in em.columns and pd.notna(row.get(c)):
+                out.loc[mask, c] = row[c]
+    out = out.sort_values("date").reset_index(drop=True)
+    if "main_net_yi" in out.columns:
+        out["main_cum_yi"] = out["main_net_yi"].cumsum()
+    if "retail_net_yi" in out.columns:
+        out["retail_cum_yi"] = out["retail_net_yi"].cumsum()
+    try:
+        out.attrs.update(getattr(base, "attrs", {}) or {})
+        out.attrs["source"] = tag
+        # 仅今日被东财补全，历史仍可能近似
+        out.attrs["parts_approx"] = bool(getattr(base, "attrs", {}).get("parts_approx"))
+        out.attrs["em_today_overlay"] = True
+    except Exception:
+        pass
+    return out
 
 
 def _df_from_bill_table(raw: pd.DataFrame) -> pd.DataFrame:
@@ -154,6 +223,106 @@ def _df_from_bill_table(raw: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _fetch_sina_fund_flow(
+    code: str,
+    *,
+    lookback_days: int = DEFAULT_LOOKBACK_DAYS,
+    timeout: int = 20,
+) -> pd.DataFrame:
+    """新浪 MoneyFlow.ssl_qsfx_zjlrqs：近 lookback_days 交易日资金流。
+
+    接口金额字段已是「元」（非万元）。当前该接口只稳定返回：
+    netamount=主力净流入，r0_net=超大单净流入；大/中/小单常缺失，
+    此时用 大单≈主力−超大单 补一列，便于细分折线可读。
+    """
+    symbol = normalize_symbol(code)
+    market = "sh" if symbol.startswith("6") else "sz"
+    daima = f"{market}{symbol}"
+    num = max(int(lookback_days or DEFAULT_LOOKBACK_DAYS), DEFAULT_LOOKBACK_DAYS) + 5
+    params = {
+        "page": "1",
+        "num": str(num),
+        "sort": "opendate",
+        "asc": "0",
+        "daima": daima,
+    }
+    headers = {
+        "User-Agent": REQUEST_HEADERS["User-Agent"],
+        "Referer": "https://vip.stock.finance.sina.com.cn/",
+        "Accept": "*/*",
+    }
+    last_err: Optional[Exception] = None
+    for trust in (False, True):
+        try:
+            sess = requests.Session()
+            sess.trust_env = trust
+            resp = sess.get(
+                SINA_MONEYFLOW_URL, params=params, headers=headers, timeout=timeout
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if not isinstance(data, list) or not data:
+                continue
+            rows = []
+            for it in data:
+                def _yuan(v) -> float:
+                    try:
+                        return float(v or 0)
+                    except (TypeError, ValueError):
+                        return 0.0
+
+                main_net = _yuan(it.get("netamount"))
+                super_net = _yuan(it.get("r0_net"))
+                # 部分环境仍可能带回 r1/r2/r3；没有则大单用主力−超大单近似
+                large_raw = it.get("r1_net")
+                mid_raw = it.get("r2_net")
+                retail_raw = it.get("r3_net")
+                if large_raw is None and mid_raw is None and retail_raw is None:
+                    large_net = main_net - super_net
+                    mid_net = 0.0
+                    retail_net = 0.0
+                    parts_approx = True
+                else:
+                    large_net = _yuan(large_raw)
+                    mid_net = _yuan(mid_raw)
+                    retail_net = _yuan(retail_raw)
+                    parts_approx = False
+
+                rows.append(
+                    {
+                        "date": it.get("opendate"),
+                        "main_net": main_net,
+                        "super_net": super_net,
+                        "large_net": large_net,
+                        "mid_net": mid_net,
+                        "retail_net": retail_net,
+                        "main_pct": None,
+                        "retail_pct": None,
+                        "_parts_approx": parts_approx,
+                    }
+                )
+            df = pd.DataFrame(rows).dropna(subset=["date"])
+            if df.empty:
+                continue
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
+            df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+            approx = bool(df["_parts_approx"].any()) if "_parts_approx" in df.columns else False
+            df = df.drop(columns=["_parts_approx"], errors="ignore")
+            for col in ["main_net", "retail_net", "mid_net", "large_net", "super_net"]:
+                df[col + "_yi"] = df[col] / 1e8
+            clipped = _finalize_fund_flow(df, lookback_days=lookback_days)
+            if not clipped.empty:
+                clipped.attrs["source"] = "sina"
+                clipped.attrs["parts_approx"] = approx
+                return clipped
+        except Exception as exc:  # noqa: BLE001
+            last_err = exc
+            continue
+    if last_err:
+        raise RuntimeError(f"新浪资金流失败: {last_err}")
+    return pd.DataFrame()
+
+
 def fetch_stock_fund_flow(
     code: str,
     begin: Optional[str] = None,
@@ -164,8 +333,15 @@ def fetch_stock_fund_flow(
     """
     个股资金流向（日），默认最近 lookback_days（30）个交易日。
 
-    优先 efinance.get_history_bill（东财同源，本机更稳）；
-    失败再试 push2his / push2delay / akshare。
+    优先级（能拿到完整多日细分时永远优先东财）：
+    1) efinance（东财同源）
+    2) 东财 push2his（完整超大/大/中/小单，多日）
+    3) akshare（底层同东财 his）
+    4) 新浪近30日 + 东财 delay 当日细分覆盖（his 被掐时的实用组合）
+    5) 东财 delay 单日（最后兜底）
+
+    说明：本机实测 push2his/push2 常被 RST；腾讯历史资金接口已下线，
+    qt.gtimg.cn/q=ff_ 亦 none_match，故无腾讯多日路径。
 
     字段单位：元
     - main_net: 主力净流入（超大单+大单）
@@ -174,19 +350,23 @@ def fetch_stock_fund_flow(
     symbol = normalize_symbol(code)
     last_error: Optional[Exception] = None
 
-    # 1) efinance：实测在 push2his 被掐时仍可返回约 120 日
+    def _clip(df: pd.DataFrame) -> pd.DataFrame:
+        clipped = _finalize_fund_flow(
+            df, begin=begin, end=end, lookback_days=lookback_days
+        )
+        if clipped.empty:
+            clipped = _finalize_fund_flow(df, lookback_days=lookback_days)
+        return clipped
+
+    # 1) efinance：东财同源，能拿到则最优先
     try:
         import efinance as ef
 
         raw = ef.stock.get_history_bill(symbol)
         if raw is not None and not raw.empty:
-            df = _df_from_bill_table(raw)
-            clipped = _finalize_fund_flow(
-                df, begin=begin, end=end, lookback_days=lookback_days
-            )
-            if clipped.empty:
-                clipped = _finalize_fund_flow(df, lookback_days=lookback_days)
+            clipped = _clip(_df_from_bill_table(raw))
             if not clipped.empty:
+                clipped.attrs["source"] = "efinance"
                 return clipped
     except Exception as exc:  # noqa: BLE001
         last_error = exc
@@ -196,7 +376,7 @@ def fetch_stock_fund_flow(
     best_n = 0
     req_lmt = max(int(lookback_days or DEFAULT_LOOKBACK_DAYS), DEFAULT_LOOKBACK_DAYS)
 
-    # 2) 东财 push2his
+    # 2) 东财 push2his（多日完整细分）
     for session in _fflow_sessions():
         for url in FFLOW_HIS_URLS:
             for attempt in range(2):
@@ -219,65 +399,74 @@ def fetch_stock_fund_flow(
         if best_n >= MIN_USEFUL_KLINES:
             break
 
-    # 3) delay（常只有 1 日）
-    if best_n < MIN_USEFUL_KLINES:
-        for session in _fflow_sessions():
-            _throttle_em(0.4)
-            try:
-                klines, payload = _request_fflow_klines(
-                    FFLOW_DELAY_URL, secid, timeout, session, lmt=req_lmt
-                )
-                n = len(klines)
-                if n > best_n:
-                    best_payload = payload
-                    best_n = n
-                if n > 0:
-                    break
-            except Exception as exc:  # noqa: BLE001
-                last_error = exc
+    if best_n >= MIN_USEFUL_KLINES and best_payload:
+        clipped = _clip(_parse_fflow_payload(best_payload))
+        if not clipped.empty:
+            clipped.attrs["source"] = "eastmoney_his"
+            return clipped
 
-    # 4) akshare
-    if best_n < MIN_USEFUL_KLINES:
+    # 3) akshare（底层东财 his；证书/网络失败则跳过）
+    try:
+        import akshare as ak
+
+        market = "sh" if secid.startswith("1.") else "sz"
+        old_get = requests.get
+
+        def _direct_get(*args, **kwargs):
+            kwargs.setdefault("timeout", timeout)
+            sess = requests.Session()
+            sess.trust_env = False
+            return sess.get(*args, **kwargs)
+
+        requests.get = _direct_get  # type: ignore[assignment]
         try:
-            import akshare as ak
+            raw = ak.stock_individual_fund_flow(stock=symbol, market=market)
+        finally:
+            requests.get = old_get  # type: ignore[assignment]
+        if raw is not None and not raw.empty:
+            clipped = _clip(_df_from_bill_table(raw))
+            if len(clipped) >= MIN_USEFUL_KLINES:
+                clipped.attrs["source"] = "akshare"
+                return clipped
+    except Exception as exc:  # noqa: BLE001
+        last_error = exc
 
-            market = "sh" if secid.startswith("1.") else "sz"
-            old_get = requests.get
-
-            def _direct_get(*args, **kwargs):
-                kwargs.setdefault("timeout", timeout)
-                sess = requests.Session()
-                sess.trust_env = False
-                return sess.get(*args, **kwargs)
-
-            requests.get = _direct_get  # type: ignore[assignment]
-            try:
-                raw = ak.stock_individual_fund_flow(stock=symbol, market=market)
-            finally:
-                requests.get = old_get  # type: ignore[assignment]
-            if raw is not None and not raw.empty:
-                df = _df_from_bill_table(raw)
-                clipped = _finalize_fund_flow(
-                    df, begin=begin, end=end, lookback_days=lookback_days
-                )
-                if clipped.empty:
-                    clipped = _finalize_fund_flow(df, lookback_days=lookback_days)
-                if not clipped.empty:
-                    return clipped
+    # 4) 东财 delay（完整细分，但常仅 1 日）——先拿到，后面覆盖到新浪序列上
+    delay_df = pd.DataFrame()
+    for session in _fflow_sessions():
+        _throttle_em(0.4)
+        try:
+            klines, payload = _request_fflow_klines(
+                FFLOW_DELAY_URL, secid, timeout, session, lmt=req_lmt
+            )
+            if klines:
+                delay_df = _clip(_parse_fflow_payload(payload))
+                if not delay_df.empty:
+                    delay_df.attrs["source"] = "eastmoney_delay"
+                break
         except Exception as exc:  # noqa: BLE001
             last_error = exc
 
-    if not best_payload or best_n <= 0:
-        raise RuntimeError(
-            "资金流向获取失败（efinance/东财/akshare 均不可用）: "
-            f"{last_error or '空数据'}"
+    # 5) 新浪近 30 日；有东财当日则覆盖细分（优先东财口径）
+    try:
+        sina_df = _fetch_sina_fund_flow(
+            code, lookback_days=lookback_days, timeout=timeout
         )
+        if len(sina_df) >= MIN_USEFUL_KLINES:
+            if not delay_df.empty:
+                return _overlay_em_day(sina_df, delay_df, tag="sina+em_delay")
+            return sina_df
+    except Exception as exc:  # noqa: BLE001
+        last_error = exc
 
-    df = _parse_fflow_payload(best_payload)
-    clipped = _finalize_fund_flow(df, begin=begin, end=end, lookback_days=lookback_days)
-    if clipped.empty:
-        clipped = _finalize_fund_flow(df, lookback_days=lookback_days)
-    return clipped
+    # 6) 仅东财 delay 单日
+    if not delay_df.empty:
+        return delay_df
+
+    raise RuntimeError(
+        "资金流向获取失败（东财his被掐/腾讯历史下线/efinance&akshare不可用/新浪失败）: "
+        f"{last_error or '空数据'}"
+    )
 
 
 def _normalize_northbound_df(raw: pd.DataFrame) -> pd.DataFrame:

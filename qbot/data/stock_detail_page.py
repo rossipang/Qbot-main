@@ -563,19 +563,76 @@ html, body { margin:0; padding:0; background:#f5f6f8; font-family:"Microsoft YaH
 """
 
 
+def _page_tab_keep_js(code: str) -> str:
+    """盘中刷新会换 file:// 文件名，用 localStorage 按代码记住标签，避免跳回分时。"""
+    safe = "".join(ch for ch in str(code or "") if ch.isalnum()) or "x"
+    return f"""
+<script>
+(function(){{
+  var KEY = "qbot_quote_tab_{safe}";
+  function tabNodes(){{
+    return Array.prototype.slice.call(
+      document.querySelectorAll(".bk-tab, .bk-tabs-header [role='tab']")
+    );
+  }}
+  function restore(){{
+    try {{
+      var i = parseInt(localStorage.getItem(KEY) || "0", 10);
+      if (!i || i < 0) return;
+      var ts = tabNodes();
+      if (ts[i]) ts[i].click();
+    }} catch (e) {{}}
+  }}
+  document.addEventListener("click", function(e){{
+    var t = e.target && e.target.closest ? e.target.closest(".bk-tab, [role='tab']") : null;
+    if (!t) return;
+    var ts = tabNodes();
+    var i = ts.indexOf(t);
+    if (i >= 0) {{
+      try {{ localStorage.setItem(KEY, String(i)); }} catch (err) {{}}
+    }}
+  }}, true);
+  function boot(){{
+    setTimeout(restore, 80);
+    setTimeout(restore, 320);
+    setTimeout(restore, 900);
+  }}
+  if (document.readyState === "complete") boot();
+  else window.addEventListener("load", boot);
+}})();
+</script>
+"""
+
+
+def _prefer_longer_frame(old, new):
+    """刷新时禁止用更短序列覆盖更长历史（防资金/日K退化成 1 日）。"""
+    if new is None or getattr(new, "empty", True):
+        return old if old is not None else new
+    if old is None or getattr(old, "empty", True):
+        return new
+    try:
+        if len(new) + 2 < len(old):
+            return old
+    except Exception:
+        pass
+    return new
+
+
 def render_stock_detail_page(
     code: str,
     output_path: Union[str, Path],
     name: str = "",
     cache: Optional[Dict[str, Any]] = None,
     refresh_heavy: bool = True,
+    active_tab: int = 0,
 ) -> Path:
     """
     生成专业个股详情 HTML（标签页切换）。
     cache: 可复用日/周/月K、资金、财务，盘中刷新时 refresh_heavy=False 只更新分时。
+    active_tab: 初始标签索引（仍会由页面 JS 用 localStorage 覆盖恢复）。
     """
     from qbot.data.eastmoney_quote import fetch_kline
-    from qbot.data.fund_flow import DEFAULT_LOOKBACK_DAYS, fetch_fund_flow_bundle
+    from qbot.data.fund_flow import DEFAULT_LOOKBACK_DAYS, MIN_USEFUL_KLINES, fetch_fund_flow_bundle
     from qbot.data.intraday import fetch_intraday_bundle
     from qbot.data.stock_finance import fetch_finance_bundle
 
@@ -598,14 +655,17 @@ def render_stock_detail_page(
         end = datetime.now()
         begin = end - timedelta(days=400)
         b, e = begin.strftime("%Y%m%d"), end.strftime("%Y%m%d")
+        prev_day = cache.get("day")
+        prev_fund = cache.get("fund")
         try:
-            cache["day"] = fetch_kline(code=code, begin=b, end=e, period="日线", adjust="前复权")
+            day_new = fetch_kline(code=code, begin=b, end=e, period="日线", adjust="前复权")
         except Exception:
-            cache["day"] = pd.DataFrame()
+            day_new = pd.DataFrame()
+        cache["day"] = _prefer_longer_frame(prev_day, day_new)
         try:
             cache["week"] = fetch_kline(code=code, begin=b, end=e, period="周线", adjust="前复权")
         except Exception:
-            cache["week"] = pd.DataFrame()
+            cache["week"] = cache.get("week") if cache.get("week") is not None else pd.DataFrame()
         try:
             cache["month"] = fetch_kline(
                 code=code,
@@ -615,22 +675,34 @@ def render_stock_detail_page(
                 adjust="前复权",
             )
         except Exception:
-            cache["month"] = pd.DataFrame()
+            cache["month"] = cache.get("month") if cache.get("month") is not None else pd.DataFrame()
         try:
             fb = fetch_fund_flow_bundle(code, lookback_days=DEFAULT_LOOKBACK_DAYS)
-            cache["fund"] = fb.get("fund_flow") if fb.get("fund_flow") is not None else pd.DataFrame()
-            cache["north"] = fb.get("northbound") if fb.get("northbound") is not None else pd.DataFrame()
+            fund_new = fb.get("fund_flow") if fb.get("fund_flow") is not None else pd.DataFrame()
+            cache["fund"] = _prefer_longer_frame(prev_fund, fund_new)
+            if fb.get("northbound") is not None and not fb.get("northbound").empty:
+                cache["north"] = fb.get("northbound")
+            elif cache.get("north") is None:
+                cache["north"] = pd.DataFrame()
         except Exception:
-            cache["fund"] = pd.DataFrame()
-            cache["north"] = pd.DataFrame()
+            if cache.get("fund") is None:
+                cache["fund"] = pd.DataFrame()
+            if cache.get("north") is None:
+                cache["north"] = pd.DataFrame()
         try:
             cache["finance"] = fetch_finance_bundle(code)
         except Exception:
-            cache["finance"] = {"valuation": {"code": code}, "income": pd.DataFrame(), "profile": {"code": code}}
+            cache["finance"] = cache.get("finance") or {
+                "valuation": {"code": code},
+                "income": pd.DataFrame(),
+                "profile": {"code": code},
+            }
         try:
             cache["news_html"] = _build_stock_news_section(code)
         except Exception:
-            cache["news_html"] = '<div style="padding:16px;color:#888">资讯暂不可用</div>'
+            cache["news_html"] = cache.get("news_html") or (
+                '<div style="padding:16px;color:#888">资讯暂不可用</div>'
+            )
         cache["ready"] = True
 
     day = cache.get("day") if cache.get("day") is not None else pd.DataFrame()
@@ -643,10 +715,17 @@ def render_stock_detail_page(
 
     # 历史日K/日资金接口常不含「当天未完结」柱；分时有当天数据时补上
     day = _ensure_today_daily_bar(day, quote, trends)
-    fund = _ensure_today_fund_bar(fund, fflow)
-    # 盘中轻刷新也写回缓存，避免日K/资金停在昨日
-    cache["day"] = day
-    cache["fund"] = fund
+    fund_src = str(getattr(fund, "attrs", {}).get("source") or "")
+    # 新浪日序列不要用东财分时资金覆盖末日，否则柱会跳、长度也可能被搞坏
+    if fund_src != "sina" and len(fund) >= MIN_USEFUL_KLINES:
+        fund = _ensure_today_fund_bar(fund, fflow)
+    elif fund_src != "sina" and (fund is None or fund.empty):
+        fund = _ensure_today_fund_bar(fund, fflow)
+    # 盘中轻刷新也写回缓存，避免日K/资金停在昨日；但禁止短序列回写覆盖长缓存
+    cache["day"] = _prefer_longer_frame(cache.get("day"), day)
+    cache["fund"] = _prefer_longer_frame(cache.get("fund"), fund)
+    day = cache.get("day") if cache.get("day") is not None else day
+    fund = cache.get("fund") if cache.get("fund") is not None else fund
 
     header = _build_header_div(quote, name, code, updated, trading)
     tab_intra = TabPanel(
@@ -674,19 +753,29 @@ def render_stock_detail_page(
         title="资讯",
     )
 
+    try:
+        active = max(0, min(int(active_tab or 0), 6))
+    except (TypeError, ValueError):
+        active = 0
     tabs = Tabs(
         tabs=[tab_intra, tab_day, tab_week, tab_month, tab_fund, tab_fin, tab_news],
         tabs_location="above",
         width=1200,
+        active=active,
     )
     layout = column(header, tabs, sizing_mode="stretch_width")
     title = f"{name} {code}".strip() or str(code)
     html = file_html(layout, INLINE, title=title)
     css = _page_css()
+    js = _page_tab_keep_js(code)
     if "<body>" in html:
         html = html.replace("<body>", "<body>" + css, 1)
+        if "</body>" in html:
+            html = html.replace("</body>", js + "</body>", 1)
+        else:
+            html = html + js
     else:
-        html = css + html
+        html = css + html + js
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)

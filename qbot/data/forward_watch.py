@@ -22,7 +22,8 @@
 算电-算必须拆池：国产服务器（紫光/浪潮/锐捷）≠ 海外组装（富联）≠ 液冷散热（英维克等）≠ 算力租赁/智算（协创等），勿混为一谈；
 协创是 token/算力租赁偏硬侧，禁止划进短剧/AIGC内容或AI应用软件。
 多元主题分散：贵金属/医药/电力/航天/军工/农业/光伏/小金属/AI应用/汽车/科技硬件等 1～2 月看好的都留；
-仅地产/教育等禁区与同质金融板不进；科技硬件发现排序有上限，防一跌全跌占满池。
+仅地产/教育等禁区与同质金融板不进；科技硬件与其它结构主题同等进池，不做「先入 N 个」硬上限。
+已入池主题靠粘性保留（近窗曾在池即粘），仅中期逻辑破坏才整主题撤，禁止因占坑乱踢。
 """
 
 from __future__ import annotations
@@ -74,7 +75,7 @@ LATEST_PATH = (
 )
 
 # 管道版本：缓存里可对照是否按新规则刷新
-PIPELINE_VERSION = "forward_v7_24_hold_intraday"
+PIPELINE_VERSION = "forward_v7_26_board_concept_fallback"
 
 # 风险分用日K缓存：code:asof → bars（单次刷新内复用）
 _RISK_BARS_CACHE: Dict[str, List[Dict[str, Any]]] = {}
@@ -581,7 +582,7 @@ THEME_HINTS: List[Dict[str, Any]] = [
             "通用航空",
             "航空装备",
         ],
-        "industries": ["航天装备", "航空装备"],
+        "industries": ["航天装备", "航空装备", "商业航天"],
         "seed_stocks": [
             ("600879", "航天电子"),
             ("600118", "中国卫星"),
@@ -615,11 +616,11 @@ THEME_HINTS: List[Dict[str, Any]] = [
             "军工",
             "国防军工",
             "地面兵装",
-            "船舶制造",
             "航空装备",
             "航天装备",
+            "船舶制造",
         ],
-        "industries": ["地面兵装", "航空装备", "船舶制造"],
+        "industries": ["军工", "国防军工", "地面兵装", "航空装备", "船舶制造"],
         "industry_label": "军工国防",
         "seed_stocks": [
             ("600760", "中航沈飞"),
@@ -1120,13 +1121,16 @@ THEME_HINTS: List[Dict[str, Any]] = [
         "seed_stocks": [
             ("002463", "沪电股份"),
             ("600183", "生益科技"),
+            ("688183", "生益电子"),
             ("002815", "崇达技术"),
+            ("002579", "中京电子"),
             ("600667", "太极实业"),
             ("001232", "嘉立创"),
         ],
         "thesis": (
-            "算力硬件上游PCB/覆铜板：中军看沪电/生益；"
-            "嘉立创偏小批量快板/PCBA一站式（非服务器板中军），业绩弹性+新股波动大，回踩观察、高位不追；"
+            "算力硬件上游PCB/覆铜板：中军看沪电/生益科技；生益电子偏封装基板/高端板旁支；"
+            "中京电子偏汽车/通信板活跃弹性腿；嘉立创偏小批量快板/PCBA一站式（非服务器板中军），"
+            "业绩弹性+新股波动大，回踩观察、高位不追；"
             "活跃旁支（太极等）有资金认可也进；挖坑日仍留池，不能一跌就踢。"
         ),
     },
@@ -2986,43 +2990,66 @@ def _industries_for_concept(concept_name: str) -> List[str]:
 def _find_industry_row(
     boards: pd.DataFrame, industry_names: List[str]
 ) -> Optional[Dict[str, Any]]:
+    """按名称找板块资金行：先行业板，再概念板回退。
+
+    军工/商业航天等东财常只挂在概念、行业侧已无「地面兵装/航天装备」等旧名；
+    若只查行业，结构保位会整主题丢光。
+    """
     if boards is None or boards.empty or not industry_names:
         return None
     _skip = {"通信", "综合", "综合Ⅱ", "综合Ⅲ", "其他", "其他Ⅱ", "其他Ⅲ"}
-    ind = boards[boards["类型"].astype(str) == "行业"].copy()
-    if ind.empty:
+    # 民航运输≠军工装备，避免「航空」类宽匹配误挂
+    _civil_air = {"航空机场", "航空运输", "航运", "航运港口"}
+
+    def _scan(pool: pd.DataFrame, *, allow_contains: bool) -> Optional[Dict[str, Any]]:
+        if pool is None or pool.empty:
+            return None
+        names = pool["板块名称"].astype(str)
+        for want in industry_names:
+            want = str(want or "").strip()
+            if not want or want in _skip or _normalize_concept_key(want) in _skip:
+                continue
+            if _is_emotion_board(want, str(pool.iloc[0].get("类型") or "行业")):
+                continue
+            exact = pool.loc[names == want]
+            if not exact.empty:
+                return exact.iloc[0].to_dict()
+        if not allow_contains:
+            return None
+        for want in industry_names:
+            want = str(want or "").strip()
+            if len(want) < 2 or want in _skip:
+                continue
+            if _is_emotion_board(want, str(pool.iloc[0].get("类型") or "行业")):
+                continue
+            sub = pool.loc[names.str.contains(re.escape(want), na=False)]
+            if sub.empty:
+                continue
+            sub = sub[
+                ~sub["板块名称"].astype(str).isin(_skip)
+                & ~sub["板块名称"].astype(str).isin(_civil_air)
+                & ~sub["板块名称"].astype(str).map(
+                    lambda x: _is_emotion_board(x, str(pool.iloc[0].get("类型") or "行业"))
+                )
+            ]
+            if sub.empty:
+                continue
+            sub = sub.assign(_nlen=names.loc[sub.index].str.len()).sort_values(
+                "_nlen", ascending=True
+            )
+            return sub.iloc[0].to_dict()
         return None
-    names = ind["板块名称"].astype(str)
-    for want in industry_names:
-        want = str(want or "").strip()
-        if not want or want in _skip or _normalize_concept_key(want) in _skip:
-            continue
-        if _is_emotion_board(want, "行业"):
-            continue
-        exact = ind.loc[names == want]
-        if not exact.empty:
-            return exact.iloc[0].to_dict()
-    for want in industry_names:
-        want = str(want or "").strip()
-        if len(want) < 2 or want in _skip:
-            continue
-        if _is_emotion_board(want, "行业"):
-            continue
-        sub = ind.loc[names.str.contains(re.escape(want), na=False)]
-        if sub.empty:
-            continue
-        # 丢掉过于宽泛的命中
-        sub = sub[
-            ~sub["板块名称"].astype(str).isin(_skip)
-            & ~sub["板块名称"].astype(str).map(lambda x: _is_emotion_board(x, "行业"))
-        ]
-        if sub.empty:
-            continue
-        sub = sub.assign(_nlen=names.loc[sub.index].str.len()).sort_values(
-            "_nlen", ascending=True
-        )
-        return sub.iloc[0].to_dict()
-    return None
+
+    ind = boards[boards["类型"].astype(str) == "行业"].copy()
+    hit = _scan(ind, allow_contains=True)
+    if hit is not None:
+        return hit
+    # 概念板：优先精确名（军工/商业航天/船舶制造），再谨慎 contains
+    con = boards[boards["类型"].astype(str) == "概念"].copy()
+    hit = _scan(con, allow_contains=False)
+    if hit is not None:
+        return hit
+    return _scan(con, allow_contains=True)
 
 
 def _theme_from_concept_industry(
@@ -3157,13 +3184,14 @@ def discover_theme_universe(
     history: Dict[str, Any],
     asof: str,
     *,
-    max_new: int = 24,
+    max_new: int = 48,
 ) -> List[Dict[str, Any]]:
     """
     概念←新闻佐证 → 映射细分行业（同概念可拆多频道）：
     1) 财经+科技新闻命中产业概念；
     2) 概念映射到东财行业板取资金，展示用 industry_label 细分；
     3) 昨日在池细分行业强制带入做生命周期。
+    池子宜大：科技/农业/军工/应用/贵金属/材料等结构主题能进则进，不做硬件先入 N 个硬砍。
     """
     themes: List[Dict[str, Any]] = []
     seen_ids: set = set()
@@ -3435,16 +3463,11 @@ def discover_theme_universe(
 
     structure_first: List[Tuple[float, Dict[str, Any]]] = []
     rest_themes: List[Tuple[float, Dict[str, Any]]] = []
-    tech_hw_structure_count = 0
     for rank, theme in reranked:
         tid = str(theme.get("id") or theme.get("_hint_id") or "")
         is_structure = tid in _STRUCTURE_KEEP_HINT_IDS or int(theme.get("priority") or 0) >= 5
         if is_structure:
-            if tid in _TECH_HARDWARE_HINT_IDS and tech_hw_structure_count >= _MAX_TECH_HARDWARE_STRUCTURE_FIRST:
-                rest_themes.append((rank - 3.0, theme))
-                continue
-            if tid in _TECH_HARDWARE_HINT_IDS:
-                tech_hw_structure_count += 1
+            # 科技硬件与其它结构主题同等入池，不再做「先入 N 个」硬上限
             structure_first.append((rank, theme))
         else:
             rest_themes.append((rank, theme))
@@ -3459,7 +3482,8 @@ def discover_theme_universe(
                 break
 
     days = sorted(d for d in (history.get("days") or {}) if d < asof)
-    if days and len(themes) < max_new + 8:
+    # 昨日在池一律尝试延续，不因当日发现已满而跳过（防 PCB 等结构主题断粘）
+    if days:
         yday = history["days"].get(days[-1]) or {}
         y_names = [str(x) for x in (yday.get("theme_names") or [])]
         y_ids = [str(x) for x in (yday.get("theme_ids") or [])]
@@ -3536,9 +3560,9 @@ def discover_theme_universe(
                 )
                 _add(theme)
 
-    # 多元主题保位：1～2月看好的都尽量留；科技硬件有上限防一跌全跌占满池
-    # 硬上限略大于 max_new：正热板不因腾位被踢；只挤同质/偏冷主题
-    hard_cap = max_new + 6
+    # 多元主题保位：科技/农业/军工/应用/贵金属/材料等结构主题尽量都留
+    # 硬上限只挡无关杂板；结构硬主题保位注入不受 hard_cap 拦截
+    hard_cap = max_new + 24
     have_ids = {str(t.get("id") or "") for t in themes}
 
     def _theme_is_hot_active(t: Dict[str, Any]) -> bool:
@@ -3665,22 +3689,28 @@ def discover_theme_universe(
                 + [str(h.get("name") or ""), industry_name]
             )
             news_hits = _news_hits_for_keys([k for k in keys if k], news)
-            # 先挤同质/偏冷；绝不挤正热。腾不出则扩到 hard_cap 直接追加。
+            # 先挤同质/偏冷；绝不挤正热。结构硬主题腾不出位也照样追加。
             while len(themes) >= max_new and (
                 _evict_one_homogeneous() or _evict_one_cold_non_structure()
             ):
                 pass
-            if len(themes) >= hard_cap and not user_pin:
-                continue
             why_keep = (
                 "用户点名强保：强制留池观察"
                 if user_pin
                 else (
                     "材料/设备/存储/贵金属/农业挖坑保位：走弱日正是观察买点，不踢出"
                     if dig_wait
-                    else "多元主题保位：防科技硬件独占挤掉医药/电力/贵金属/光伏/军工/小金属等"
+                    else "多元主题保位：科技/农业/军工/应用/贵金属/材料等结构主题同等留池"
                 )
             )
+            # 仅无关杂板受 hard_cap；结构硬主题/挖坑/点名强保一律注入
+            if (
+                len(themes) >= hard_cap
+                and not user_pin
+                and not dig_wait
+                and hid not in _STRUCTURE_KEEP_HINT_IDS
+            ):
+                continue
             theme = _theme_from_concept_industry(
                 concept_name=str(h.get("concept_group") or h.get("name")),
                 industry_row=ind_row,
@@ -4124,6 +4154,16 @@ def _theme_recent_streak(
     return streak
 
 
+def _theme_recent_presence(
+    history: Dict[str, Any], theme: Dict[str, Any], asof: str, lookback: int = 12
+) -> int:
+    """asof 之前 lookback 日内曾在池的天数（不要求连续）。用于防断一日就丢粘性。"""
+    days = sorted(d for d in (history.get("days") or {}) if d < asof)[-lookback:]
+    if not days:
+        return 0
+    return sum(1 for d in days if _theme_in_day(history["days"].get(d) or {}, theme))
+
+
 def _theme_consecutive_bad_days(
     history: Dict[str, Any], theme: Dict[str, Any], asof: str
 ) -> int:
@@ -4238,6 +4278,7 @@ def _evaluate_theme_entry(
     board_flow5: Optional[float],
     recent_streak: int,
     bad_before: int,
+    recent_presence: int = 0,
 ) -> Tuple[bool, bool, bool, str, List[str], bool, str, int]:
     """
     主题是否进入当日观察。
@@ -4245,7 +4286,7 @@ def _evaluate_theme_entry(
 
     原则：
     - 新进：板块须具备约1～2月前瞻，宁缺毋滥；
-    - 已在池：不因单日/两日走弱踢；仅中期逻辑破坏才整主题撤；
+    - 已在池/近窗曾在池：不因单日断档或一两日走弱踢；仅中期逻辑破坏才整主题撤；
     - 主题日弱时仍可列个股，盯微跌/起稳/回踩（选股对象）。
     """
     reasons: List[str] = []
@@ -4305,8 +4346,11 @@ def _evaluate_theme_entry(
     enter_sticky = False
     kicked = False
 
-    if recent_streak >= 1:
-        # —— 已在池：粘性；仅中期逻辑坏了才撤 ——
+    # 近窗曾在池即粘（不要求连续）；防 PCB 等断一日后被当新进挤掉
+    sticky_eligible = int(recent_streak) >= 1 or int(recent_presence) >= 1
+
+    if sticky_eligible:
+        # —— 已在池/近窗粘性：仅中期逻辑坏了才撤 ——
         if thesis_broken:
             kicked = True
             reasons.append(f"主题中期逻辑破坏，整主题撤出：{thesis_why}")
@@ -4317,9 +4361,14 @@ def _evaluate_theme_entry(
                     f"已在池：板块当日走弱不撤（{weak_why}）；"
                     "个股盯微跌/起稳/回踩，止损属持有期"
                 )
-            elif forward_ok:
+            elif int(recent_streak) >= 1 and forward_ok:
                 reasons.append(
                     f"延续前瞻：已连续{recent_streak}日在池，今日{theme_grade}；{forward_why}"
+                )
+            elif int(recent_presence) >= 1 and int(recent_streak) < 1:
+                reasons.append(
+                    f"近窗粘性续留（近12日曾在池{recent_presence}日，防断档乱踢）；"
+                    f"今日{theme_grade}；{forward_why}"
                 )
             else:
                 reasons.append(
@@ -4343,7 +4392,7 @@ def _evaluate_theme_entry(
             reasons.append(forward_why)
 
     # 结构硬主题：新进被挡时仍可保位注入（材料/PCB）；已在池已由粘性处理
-    if structure_keep and recent_streak < 1 and not enter_new and not kicked:
+    if structure_keep and not sticky_eligible and not enter_new and not kicked:
         if theme_grade != "走弱" or dig_wait:
             enter_new = True
             reasons.append(
@@ -4585,7 +4634,7 @@ _STRUCTURE_KEEP_HINT_IDS = frozenset(
     }
 )
 
-# 科技硬件簇：CPO/服务器/PCB/材料/设备/MLCC/存储等同涨同跌，发现阶段最多先入池 N 个
+# 科技硬件簇：仅作标签（同涨同跌描述）；发现阶段不再做「先入 N 个」硬上限
 _TECH_HARDWARE_HINT_IDS = frozenset(
     {
         "cpo_optical",
@@ -4602,7 +4651,8 @@ _TECH_HARDWARE_HINT_IDS = frozenset(
     }
 )
 
-_MAX_TECH_HARDWARE_STRUCTURE_FIRST = 5
+# 已废弃：保留常量以免外部引用报错；逻辑侧不再使用
+_MAX_TECH_HARDWARE_STRUCTURE_FIRST = 999
 
 # 挖坑观察：跌了才有买点窗口——走弱日也不踢
 _DIG_WAIT_HINT_IDS = frozenset(
@@ -5539,16 +5589,21 @@ _DAILY_SHORT_BOARD_SEEDS: Dict[str, List[Tuple[str, str]]] = {
     "PCB": [
         ("002463", "沪电股份"),
         ("600183", "生益科技"),
+        ("688183", "生益电子"),
         ("001232", "嘉立创"),
         ("002815", "崇达技术"),
+        ("002579", "中京电子"),
     ],
     "印制电路板": [
         ("002463", "沪电股份"),
         ("600183", "生益科技"),
+        ("688183", "生益电子"),
         ("001232", "嘉立创"),
+        ("002579", "中京电子"),
     ],
     "覆铜板": [
         ("600183", "生益科技"),
+        ("688183", "生益电子"),
         ("002463", "沪电股份"),
     ],
     "传媒": [
@@ -7413,7 +7468,7 @@ def build_forward_watch(
 
     # 每日动态主题宇宙（非写死白名单）+ 昨日在池延续
     theme_universe = discover_theme_universe(
-        boards, news, history, asof, max_new=26
+        boards, news, history, asof, max_new=48
     )
 
     # 先收集候选代码，批量取行情
@@ -7427,6 +7482,7 @@ def build_forward_watch(
         # 始终按产业匹配重排，不锁死昨日/发现时的坏板名（如虚拟机器人）
         board_sub = _match_boards(theme, boards)
         recent_streak = _theme_recent_streak(history, theme, asof)
+        recent_presence = _theme_recent_presence(history, theme, asof, lookback=12)
         bad_before = _theme_consecutive_bad_days(history, theme, asof)
         good_before = _theme_consecutive_good_days(history, theme, asof)
 
@@ -7473,12 +7529,13 @@ def build_forward_watch(
                 board_flow5=board_flow5,
                 recent_streak=recent_streak,
                 bad_before=bad_before,
+                recent_presence=recent_presence,
             )
             if enter:
                 top_board = cand
                 theme["_matched_board"] = board_name
                 break
-            if best_fail is None or (kicked and recent_streak >= 1):
+            if best_fail is None or (kicked and (recent_streak >= 1 or recent_presence >= 1)):
                 best_fail = (
                     enter,
                     weak_board,
@@ -8279,7 +8336,8 @@ def build_forward_watch(
             "股价≥800不进观察/短线池（一手成本过高）；种子名单不列高价票，跳过时不占主题名额；配置种子全量刷、不截前几只。"
             "算电-算拆池：国产服务器（紫光/浪潮/锐捷）≠海外组装（富联）≠液冷散热（英维克等）。"
             "多元主题分散：贵金属/医药/电力/航天/军工/光伏/小金属/AI应用/汽车/科技等1～2月看好的都留；"
-            "科技硬件发现排序有上限；地产/教育等禁区与同质金融板不进。"
+            "科技硬件与其它结构主题同等进池、不做先入N个硬上限；近窗曾在池即粘，禁止占坑乱踢；"
+            "地产/教育等禁区与同质金融板不进。"
             "银行/证券/煤炭等同质板须新闻+资金才进，观察最多2～3只；"
             "PCB/材料/贵金属等保位主题不被同质板挤出。"
             "双星：主线星=贴合热主线；买点星=时机。"

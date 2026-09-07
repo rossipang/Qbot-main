@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout, as_completed
 from pathlib import Path
@@ -344,34 +345,176 @@ _MARKET_NOISE_TITLE_PATTERNS = (
     "集体翻绿",
     "飘红超",
     "飘绿超",
+    # 当日涨跌播报（概念拉升/个股涨跌停），非宏观·产业·公司实质新闻
+    "震荡拉升",
+    "震荡走高",
+    "震荡反弹",
+    "反复活跃",
+    "表现活跃",
+    "再度活跃",
+    "开盘强势",
+    "早盘走强",
+    "早盘拉升",
+    "早盘高开",
+    "盘中走高",
+    "盘中拉升",
+    "再度拉升",
+    "持续走高",
+    "快速跳水",
+    "涨幅靠前",
+    "涨幅居前",
+    "跌幅居前",
+    "跟涨",
+    "双双涨停",
+    "集体涨停",
+    "批量涨停",
+    "主力资金",
+    "净流入超",
+    "净流出超",
+    "净买入超",
+    "净卖出超",
+)
+
+# 软实质词：可盖过「跟涨/走高」等泛盘面词；盖不住「概念拉升/回应跌停」主句
+_MARKET_NOISE_SUBSTANCE_KEEP = (
+    "澄清",
+    "提示风险",
+    "风险提示",
+    "获批",
+    "印发",
+    "政策",
+    "意见",
+    "通知",
+    "订单",
+    "中标",
+    "签署",
+    "合作",
+    "并购",
+    "收购",
+    "财报",
+    "年报",
+    "半年报",
+    "季报",
+    "业绩预告",
+    "营收",
+    "净利",
+    "研发",
+    "量产",
+    "扩产",
+    "投产",
+    "专利",
+    "备案",
+    "立项",
+    "招标",
+    "中选",
+    "医保",
+    "目录",
+    "降息",
+    "加息",
+    "GDP",
+    "PMI",
+    "央行",
+    "国常会",
+    "国务院",
+    "工信部",
+    "发改委",
+    "覆盖并给予",
+    "首次覆盖",
+    "目标价",
+    "上调评级",
+    "下调评级",
+    "合资",
+    "拟出资",
+    "参设",
+    "减持",
+    "增持",
+    "回购",
+    "方案",
+)
+
+# 强实质词：才允许放行「回应跌停 / 概念震荡拉升」类主句
+_MARKET_NOISE_STRONG_KEEP = (
+    "澄清",
+    "提示风险",
+    "风险提示",
+    "获批",
+    "印发",
+    "终止收购",
+    "并购",
+    "订单",
+    "中标",
+    "业绩预告",
+    "首次覆盖",
+    "拟出资",
+    "参设",
+)
+
+_PRICE_ACTION_BOARD_RE = re.compile(
+    r"(概念|板块|概念股).{0,16}(震荡|拉升|走高|反弹|活跃|强势|走强|翻红|翻绿|高开|跳水|回落)"
+)
+_PRICE_ACTION_LIMIT_RE = re.compile(
+    r"("
+    r"早盘触及.{0,8}(涨停|跌停)"
+    r"|触及\s*\d*\s*[CcＣｃ]?[MmＭｍ]?\s*(涨停|跌停)"
+    r"|\d+\s*[CcＣｃ][MmＭｍ]\s*(涨停|跌停)"
+    r"|\d+\s*%\s*(涨停|跌停)"
+    r"|回应.{0,10}(涨停|跌停)"
+    r"|快速跳水"
+    r"|全线(拉升|走强|翻红|翻绿)"
+    r"|暴涨\s*\d+\s*点"
+    r"|(涨停|跌停).{0,12}(跟涨|涨幅|跌幅|创上市|创历史|总市值)"
+    r"|(跟涨|涨幅靠前|涨幅居前).{0,20}(涨停|跌停)?"
+    r")"
 )
 
 
 def news_title_is_market_noise(title: str) -> bool:
-    """盘面走势播报/整点回顾：不是公司·产业·政策实讯。"""
+    """盘面走势播报/当日涨跌快讯：不是公司·产业·政策实讯。"""
     t = str(title or "").strip()
     if not t:
         return True
+    strong = any(k in t for k in _MARKET_NOISE_STRONG_KEEP)
+    soft = any(k in t for k in _MARKET_NOISE_SUBSTANCE_KEEP)
+    # 概念/板块涨跌主句、涨跌停播报：仅强实质词可放行
+    if _PRICE_ACTION_BOARD_RE.search(t) and not strong:
+        return True
+    if _PRICE_ACTION_LIMIT_RE.search(t) and not strong:
+        return True
     if any(k in t for k in _MARKET_NOISE_TITLE_PATTERNS):
-        return True
-    # 「深成指/创业板指/科创50 + 跌超/涨超 + 方向跌幅居前」类纯指数播报
-    index_hit = sum(
-        1
-        for k in (
-            "深成指",
-            "创业板指",
-            "科创50",
-            "上证指数",
-            "沪指",
-            "深指",
-            "北证50",
-        )
-        if k in t
+        return not soft
+    index_keys = (
+        "深成指",
+        "创业板指",
+        "科创50",
+        "上证指数",
+        "沪指",
+        "深指",
+        "北证50",
+        "费城",
+        "纳斯达克",
+        "道指",
+        "韩国综合指数",
+        "日经",
+        "恒生指数",
     )
-    if index_hit >= 2 and any(
-        k in t for k in ("跌超", "涨超", "翻绿", "翻红", "震荡回落", "跌幅居前", "涨幅居前")
-    ):
-        return True
+    index_hit = sum(1 for k in index_keys if k in t)
+    move_keys = (
+        "跌超",
+        "涨超",
+        "翻绿",
+        "翻红",
+        "震荡回落",
+        "跌幅居前",
+        "涨幅居前",
+        "全线走强",
+        "全线拉升",
+        "延续涨势",
+        "大涨",
+        "大跌",
+    )
+    if index_hit >= 1 and any(k in t for k in move_keys):
+        if not strong and not any(k in t for k in ("量产", "获批", "订单")):
+            return True
     return False
 
 
