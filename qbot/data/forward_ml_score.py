@@ -54,14 +54,16 @@ FEATURE_SPEC: List[Tuple[str, str]] = [
     ("vol_std10", "10日波动"),
     ("downside10", "10日下行偏差"),
     ("max_dd20", "20日最大回撤%"),
-        ("rs_index5", "相对300ETF_5日"),
-        ("rs_index10", "相对300ETF_10日"),
-        ("flow_1d", "主力流入1日亿"),
-        ("flow_3d", "主力流入3日亿"),
-        ("flow_5d", "主力流入5日亿"),
-        ("board_pct_1", "主题板涨跌1日"),
-        ("board_pct_5", "主题板涨跌5日"),
-        ("rs_board_1", "相对主题板1日"),
+    ("rs_index5", "相对300ETF_5日"),
+    ("rs_index10", "相对300ETF_10日"),
+    ("flow_1d", "主力流入1日亿"),
+    ("flow_3d", "主力流入3日亿"),
+    ("flow_5d", "主力流入5日亿"),
+    ("flow_accel", "资金流入加速度"),
+    ("board_pct_1", "主题板涨跌1日"),
+    ("board_pct_5", "主题板涨跌5日"),
+    ("rs_board_1", "相对主题板1日"),
+    ("pct_rank_theme", "主题内涨跌分位"),
 ]
 
 FEATURE_KEYS = [k for k, _ in FEATURE_SPEC]
@@ -300,9 +302,11 @@ def features_from_bars(
         "flow_1d": 0.0,
         "flow_3d": 0.0,
         "flow_5d": 0.0,
+        "flow_accel": 0.0,
         "board_pct_1": 0.0,
         "board_pct_5": 0.0,
         "rs_board_1": 0.0,
+        "pct_rank_theme": 0.5,
     }
 
 
@@ -321,12 +325,16 @@ def apply_flow_board_features(
             out["flow_3d"] = _f(panel_row.get("flow_3d"))
         if panel_row.get("flow_5d") is not None:
             out["flow_5d"] = _f(panel_row.get("flow_5d"))
+        if panel_row.get("flow_accel") is not None:
+            out["flow_accel"] = _f(panel_row.get("flow_accel"))
         if panel_row.get("board_pct") is not None:
             out["board_pct_1"] = _f(panel_row.get("board_pct"))
         if panel_row.get("board_pct_5") is not None:
             out["board_pct_5"] = _f(panel_row.get("board_pct_5"))
         if panel_row.get("rs_board") is not None:
             out["rs_board_1"] = _f(panel_row.get("rs_board"))
+        if panel_row.get("pct_rank_theme") is not None:
+            out["pct_rank_theme"] = _f(panel_row.get("pct_rank_theme"), 0.5)
     if live:
         # live 可覆盖当日（盘中更新）
         if live.get("flow") is not None:
@@ -348,13 +356,25 @@ def _forward_label(
     *,
     dates: Optional[Sequence[str]] = None,
     index_close_by_date: Optional[Dict[str, float]] = None,
+    theme_board_by_date: Optional[Dict[str, float]] = None,
 ) -> Optional[float]:
-    """0.4*次日 + 0.6*三日收益（%）；有指数时改为相对沪深300超额。"""
+    """0.4*次日 + 0.6*三日收益（%）。
+
+    优先减主题等权板同期收益（截面超额）；否则减 300ETF；都没有则用绝对收益。
+    """
     if i + 3 >= len(closes) or closes[i] <= 0:
         return None
     r1 = (closes[i + 1] / closes[i] - 1.0) * 100.0
     r3 = (closes[i + 3] / closes[i] - 1.0) * 100.0
     lab = 0.4 * r1 + 0.6 * r3
+    if theme_board_by_date and dates and i + 3 < len(dates):
+        b1 = theme_board_by_date.get(dates[i + 1])
+        b2 = theme_board_by_date.get(dates[i + 2])
+        b3 = theme_board_by_date.get(dates[i + 3])
+        if b1 is not None and b2 is not None and b3 is not None:
+            br1 = float(b1)
+            br3 = float(b1) + float(b2) + float(b3)
+            return lab - (0.4 * br1 + 0.6 * br3)
     if (
         index_close_by_date
         and dates
@@ -379,10 +399,12 @@ def build_training_matrix(
     max_per_code: int = DEFAULT_MAX_PER_CODE,
     index_close_by_date: Optional[Dict[str, float]] = None,
     panel_by_code: Optional[Dict[str, Dict[str, Dict[str, Any]]]] = None,
+    theme_boards: Optional[Dict[str, Dict[str, float]]] = None,
 ) -> Tuple[List[List[float]], List[float], List[str]]:
     """返回 X, y, dates（YYYYMMDD，用于时间切分）。
 
     panel_by_code: code -> date -> {main_net_yi, flow_3d, board_pct, ...}
+    theme_boards: theme_id -> date -> board_pct（用于主题超额标签）
     """
     xs: List[List[float]] = []
     ys: List[float] = []
@@ -390,10 +412,18 @@ def build_training_matrix(
     for code, bars in (bars_by_code or {}).items():
         if not bars or len(bars) < DEFAULT_MIN_BARS:
             continue
+        code6 = str(code).zfill(6)[-6:]
         ohlcv = [_bar_ohlcv(b) for b in bars]
         closes = [x[3] for x in ohlcv]
         dates_b = [_bar_date(b) for b in bars]
-        panel = (panel_by_code or {}).get(str(code).zfill(6)[-6:]) or {}
+        panel = (panel_by_code or {}).get(code6) or {}
+        # 任取一日的 theme_id
+        tid = None
+        for _d, row in panel.items():
+            if row.get("theme_id"):
+                tid = str(row.get("theme_id"))
+                break
+        tboard = (theme_boards or {}).get(tid or "") if tid else None
         last_feat_i = len(bars) - 4  # need i+3
         first_i = max(20, DEFAULT_MIN_BARS - 1)
         idxs = list(range(first_i, last_feat_i + 1))
@@ -408,6 +438,7 @@ def build_training_matrix(
                 i,
                 dates=dates_b,
                 index_close_by_date=index_close_by_date,
+                theme_board_by_date=tboard,
             )
             if feat is None or y is None:
                 continue
@@ -426,12 +457,16 @@ def build_training_matrix_from_store(
     max_per_code: int = DEFAULT_MAX_PER_CODE,
     index_code: str = INDEX_CODE,
     min_bars: int = DEFAULT_MIN_BARS,
-) -> Tuple[Dict[str, List[Dict[str, Any]]], Dict[str, float], Dict[str, Dict[str, Dict[str, Any]]]]:
-    """从 SQLite 装载 bars / 指数 / 资金板 panel。"""
+) -> Tuple[
+    Dict[str, List[Dict[str, Any]]],
+    Dict[str, float],
+    Dict[str, Dict[str, Dict[str, Any]]],
+    Dict[str, Dict[str, float]],
+]:
+    """从 SQLite 装载 bars / 指数 / 资金板 panel / 主题板。"""
     from qbot.data import ml_factor_store as store
 
     codes = store.list_store_codes(min_bars=min_bars)
-    # 指数不进训练宇宙
     codes = [c for c in codes if c != str(index_code).zfill(6)[-6:]]
     bars_by_code: Dict[str, List[Dict[str, Any]]] = {}
     panel_by_code: Dict[str, Dict[str, Dict[str, Any]]] = {}
@@ -443,8 +478,10 @@ def build_training_matrix_from_store(
         panel_by_code[code] = store.load_flow_board_panel(
             code, limit=max(max_per_code + 80, 220)
         )
+    store.attach_theme_pct_ranks(panel_by_code)
     idx_map = store.load_index_close_map(index_code)
-    return bars_by_code, idx_map, panel_by_code
+    theme_boards = store.load_theme_board_maps()
+    return bars_by_code, idx_map, panel_by_code, theme_boards
 
 
 def _heuristic_score(feat: Dict[str, float], live: Optional[Dict[str, float]] = None) -> float:
@@ -559,7 +596,7 @@ def train_short_gbdt_from_store(
     force: bool = True,
 ) -> Dict[str, Any]:
     """从本地 SQLite 因子库训练（周训入口）。"""
-    bars_by_code, idx_map, panel_by_code = build_training_matrix_from_store(
+    bars_by_code, idx_map, panel_by_code, theme_boards = build_training_matrix_from_store(
         max_per_code=max_per_code
     )
     if idx_map:
@@ -571,6 +608,7 @@ def train_short_gbdt_from_store(
         max_per_code=max_per_code,
         index_close_by_date=idx_map or None,
         panel_by_code=panel_by_code,
+        theme_boards=theme_boards,
         force=force,
     )
     meta["source"] = "ml_factor_store"
@@ -607,6 +645,7 @@ def train_short_gbdt(
     max_per_code: int = DEFAULT_MAX_PER_CODE,
     index_close_by_date: Optional[Dict[str, float]] = None,
     panel_by_code: Optional[Dict[str, Dict[str, Dict[str, Any]]]] = None,
+    theme_boards: Optional[Dict[str, Dict[str, float]]] = None,
     force: bool = False,
 ) -> Dict[str, Any]:
     """训练并可选落盘；样本不足返回 heuristic 标记。
@@ -618,6 +657,7 @@ def train_short_gbdt(
         max_per_code=max_per_code,
         index_close_by_date=index_close_by_date,
         panel_by_code=panel_by_code,
+        theme_boards=theme_boards,
     )
     meta: Dict[str, Any] = {
         "n_samples": len(ys),
@@ -626,7 +666,7 @@ def train_short_gbdt(
         "backend": "heuristic",
         "feature_keys": list(FEATURE_KEYS),
         "n_features": len(FEATURE_KEYS),
-        "label": "0.4*ret1+0.6*ret3 excess_vs_510300_if_avail",
+        "label": "0.4*ret1+0.6*ret3 excess_vs_theme_else_510300",
         "split": "time_last_20pct",
     }
     if len(ys) < min_samples:
@@ -682,8 +722,12 @@ def train_short_gbdt(
         mae = float(np.mean(np.abs(pred - yte)))
         hit = float(np.mean((pred > 0) == (yte > 0)))
         ric = _rank_ic(pred, yte)
+        # 多空组差：预测最高20% − 最低20% 的真实标签均值
+        order = np.argsort(pred)
+        k = max(1, len(pred) // 5)
+        spread = float(np.mean(yte[order[-k:]]) - np.mean(yte[order[:k]]))
     except Exception:
-        mae, hit, ric = None, None, None
+        mae, hit, ric, spread = None, None, None, None
 
     payload = {
         "model": model,
@@ -696,6 +740,7 @@ def train_short_gbdt(
             "mae": mae,
             "dir_hit": hit,
             "rank_ic": ric,
+            "long_short_spread": spread,
             "n_train": int(len(ytr)),
             "n_test": int(len(yte)),
             "date_min": min(ds) if ds else None,

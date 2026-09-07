@@ -540,6 +540,14 @@ def load_flow_board_panel(
 
         out[d]["flow_3d"] = _sum_last(3)
         out[d]["flow_5d"] = _sum_last(5)
+        # 资金加速度：今日流入 − 昨日流入
+        if i == 0:
+            out[d]["flow_accel"] = None
+        else:
+            a, b = flows[i], flows[i - 1]
+            out[d]["flow_accel"] = (
+                float(a - b) if a is not None and b is not None else None
+            )
         # board 5d sum of theme daily pct
         if theme_id:
             b5 = []
@@ -551,6 +559,54 @@ def load_flow_board_panel(
         else:
             out[d]["board_pct_5"] = None
     return out
+
+
+def load_theme_board_maps(
+    *, path: Optional[Path] = None
+) -> Dict[str, Dict[str, float]]:
+    """theme_id -> {date: board_pct}。"""
+    with connect(path, readonly=True) as conn:
+        rows = conn.execute(
+            "SELECT theme_id, date, board_pct FROM theme_day WHERE board_pct IS NOT NULL"
+        ).fetchall()
+    out: Dict[str, Dict[str, float]] = {}
+    for r in rows:
+        tid = str(r["theme_id"])
+        out.setdefault(tid, {})[str(r["date"])] = float(r["board_pct"])
+    return out
+
+
+def attach_theme_pct_ranks(
+    panel_by_code: Dict[str, Dict[str, Dict[str, Any]]],
+    *,
+    path: Optional[Path] = None,
+) -> None:
+    """就地写入 pct_rank_theme：当日主题内涨跌分位 ∈[0,1]。"""
+    # theme -> date -> [(code, pct)]
+    buckets: Dict[str, Dict[str, List[Tuple[str, float]]]] = {}
+    for code, panel in (panel_by_code or {}).items():
+        for d, row in (panel or {}).items():
+            tid = row.get("theme_id")
+            pct = row.get("pct")
+            if not tid or pct is None:
+                continue
+            buckets.setdefault(str(tid), {}).setdefault(str(d), []).append(
+                (code, float(pct))
+            )
+    for code, panel in (panel_by_code or {}).items():
+        for d, row in (panel or {}).items():
+            tid = row.get("theme_id")
+            pct = row.get("pct")
+            if not tid or pct is None:
+                row["pct_rank_theme"] = None
+                continue
+            peers = buckets.get(str(tid), {}).get(str(d)) or []
+            if len(peers) < 2:
+                row["pct_rank_theme"] = 0.5
+                continue
+            # 分位：有多少同伴涨跌 ≤ 自己
+            n_le = sum(1 for _c, p in peers if p <= float(pct))
+            row["pct_rank_theme"] = float(n_le) / float(len(peers))
 
 
 def list_store_codes(*, path: Optional[Path] = None, min_bars: int = 65) -> List[str]:
