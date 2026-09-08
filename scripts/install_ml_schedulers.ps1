@@ -14,10 +14,15 @@
 #>
 param(
     [switch]$Uninstall,
-    [string]$ProjectRoot = "D:\project\Qbot-main"
+    [string]$ProjectRoot = ""
 )
 
 $ErrorActionPreference = "Stop"
+
+if (-not $ProjectRoot) {
+    # scripts/ 的上一级即为仓库根；兼容家里 D:\project 与公司 E:\projects
+    $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+}
 
 $tasks = @(
     @{

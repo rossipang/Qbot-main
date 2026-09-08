@@ -8,12 +8,14 @@
 | 周训 GBDT | 周五 22:00 | `run_ml_friday_train.bat` |
 | 周日补训 | 周日 22:00 | `run_ml_sunday_catchup.bat`（周五已成功周训则跳过） |
 
-安装 / 卸载：
+安装 / 卸载（自动识别仓库根目录，兼容家里 `D:\project` 与公司路径）：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts\install_ml_schedulers.ps1
 powershell -ExecutionPolicy Bypass -File scripts\install_ml_schedulers.ps1 -Uninstall
 ```
+
+`run_ml_*.bat` 用脚本所在目录定位项目根，并用 `_ml_resolve_python.bat` 探测 `Qbot` 环境的 python（anaconda / miniforge）。
 
 任务设置了 `StartWhenAvailable`：若触发时关机，开机后会补跑错过的那一次。
 
