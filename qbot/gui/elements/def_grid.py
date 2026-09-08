@@ -11,6 +11,11 @@ class GridTable(wx.grid.Grid):
 
         wx.grid.Grid.__init__(self, parent, id=-1)
         self.CreateGrid(nrow, ncol)
+        # wxWidgets 3.3+ overlay 选中会整片刷蓝表头；关掉恢复旧观感
+        try:
+            self.DisableOverlaySelection()
+        except Exception:
+            pass
 
     def AutoRowNums(self, cur_rows=0, to_rows=0):
 

@@ -2513,8 +2513,10 @@ def fetch_industry_boards(*, fast: bool = False) -> pd.DataFrame:
     """
     page_sleep = 0.05 if fast else 0.25
     req_timeout = 8 if fast else 20
-    ind_pages = 4 if fast else 5
-    con_pages = 5 if fast else 6
+    # fast 也要盖住全部行业板：fid=f62 按资金流排序，材料/设备走弱时会掉到后页；
+    # 以前 ind_pages=4 会把「半导体材料」等整块漏掉，前瞻保位对不上板名就整主题消失。
+    ind_pages = 6 if fast else 6
+    con_pages = 6 if fast else 6
     base = {
         "po": "1",
         "np": "1",

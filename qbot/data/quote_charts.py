@@ -36,6 +36,38 @@ VOLUME_UP = "#f7a1a4"
 VOLUME_DOWN = "#8fd19e"
 
 
+def inject_into_bokeh_html(
+    html: str,
+    *,
+    body_prepend: str = "",
+    body_append: str = "",
+) -> str:
+    """往 Bokeh file_html 真·body 里插内容。
+
+    INLINE 的 bokeh*.js 字符串里也会出现 ``<body>`` / ``</body>``；
+    若用首次 replace，会把后续 JS 露成页面正文（个股详情「满屏 JS」）。
+    """
+    if not html:
+        return (body_prepend or "") + (body_append or "")
+    lower = html.lower()
+    body_close = lower.rfind("</body>")
+    if body_close < 0:
+        return (body_prepend or "") + html + (body_append or "")
+    body_open = lower.rfind("<body", 0, body_close)
+    if body_open < 0:
+        return html[:body_close] + (body_append or "") + html[body_close:]
+    gt = html.find(">", body_open)
+    if gt < 0 or gt >= body_close:
+        return html[:body_close] + (body_append or "") + html[body_close:]
+    return (
+        html[: gt + 1]
+        + (body_prepend or "")
+        + html[gt + 1 : body_close]
+        + (body_append or "")
+        + html[body_close:]
+    )
+
+
 def _prepare_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
     data = df.copy()
     rename = {}
@@ -1367,12 +1399,11 @@ body { font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif; margin: 0;
   <div class="desc">滚轮缩放 · 拖动平移 · 悬停看明细 · 近30日资金流 · 财务估值与营收净利 · 近一周新闻公告</div>
 </div>
 """
-    if "<body>" in html:
-        html = html.replace("<body>", "<body>" + tip + '<div class="card">', 1)
-        html = html.replace(
-            "</body>",
-            '</div><div class="sec-bar">资讯中心</div>' + news_html + "</body>",
-            1,
+    if "<body" in html.lower():
+        html = inject_into_bokeh_html(
+            html,
+            body_prepend=tip + '<div class="card">',
+            body_append='</div><div class="sec-bar">资讯中心</div>' + news_html,
         )
     else:
         html = tip + html + news_html
@@ -1631,8 +1662,8 @@ body { font-family:"Microsoft YaHei","Segoe UI",Arial,sans-serif; margin:0; padd
 .qx-sub { margin-top:6px; font-size:11px; color:#999; }
 </style>
 """
-    if "<body>" in html:
-        html = html.replace("<body>", "<body>" + css, 1)
+    if "<body" in html.lower():
+        html = inject_into_bokeh_html(html, body_prepend=css)
     else:
         html = css + html
 

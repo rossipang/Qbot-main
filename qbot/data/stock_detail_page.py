@@ -43,6 +43,7 @@ from qbot.data.quote_charts import (
     _prepare_ohlcv,
     _sign_cls,
     _tools,
+    inject_into_bokeh_html,
 )
 
 
@@ -768,12 +769,8 @@ def render_stock_detail_page(
     html = file_html(layout, INLINE, title=title)
     css = _page_css()
     js = _page_tab_keep_js(code)
-    if "<body>" in html:
-        html = html.replace("<body>", "<body>" + css, 1)
-        if "</body>" in html:
-            html = html.replace("</body>", js + "</body>", 1)
-        else:
-            html = html + js
+    if "<body" in html.lower():
+        html = inject_into_bokeh_html(html, body_prepend=css, body_append=js)
     else:
         html = css + html + js
 

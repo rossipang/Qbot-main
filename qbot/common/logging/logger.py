@@ -1,29 +1,29 @@
 import logging
+import os
 
-# 1.创建一个logger实例，并且logger实例的名称命名为“single info”，设定的严重级别为DEBUG
+# Console stays quiet by default; set QBOT_DEBUG=1 for verbose startup/trace.
+_DEBUG = os.environ.get("QBOT_DEBUG", "").strip().lower() in ("1", "true", "yes")
+_CONSOLE_LEVEL = logging.DEBUG if _DEBUG else logging.WARNING
+_LOGGER_LEVEL = logging.DEBUG if _DEBUG else logging.WARNING
+
 LOGGER = logging.getLogger("qbot")
-LOGGER.setLevel(logging.DEBUG)
+LOGGER.setLevel(_LOGGER_LEVEL)
+LOGGER.propagate = False
 
-LOGGER_TXT = logging.getLogger("qbot")
-LOGGER_TXT.setLevel(logging.DEBUG)
+# Avoid duplicate handlers on re-import / hot reload.
+if not getattr(LOGGER, "_qbot_handlers_ready", False):
+    ch = logging.StreamHandler()
+    ch.setLevel(_CONSOLE_LEVEL)
+    fh = logging.FileHandler("qbot_pro.log", encoding="utf-8", mode="a")
+    fh.setLevel(logging.WARNING)
+    formatter = logging.Formatter(
+        "%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d %(funcName)s: %(message)s"
+    )
+    ch.setFormatter(formatter)
+    fh.setFormatter(formatter)
+    LOGGER.addHandler(ch)
+    LOGGER.addHandler(fh)
+    LOGGER._qbot_handlers_ready = True  # type: ignore[attr-defined]
 
-# 2.创建一个handler，这个主要用于控制台输出日志，并且设定严重级别
-ch = logging.StreamHandler()
-ch.setLevel(logging.DEBUG)
-
-# 2、创建一个handler，用于写入日志文件
-fh = logging.FileHandler("qbot_pro.log", encoding="utf-8", mode="a")
-fh.setLevel(logging.WARNING)
-
-# 3.创建handler的输出格式（formatter）
-formatter = logging.Formatter(
-    "%(asctime)s - %(levelname)s - %(filename)s:%(lineno)d %(funcName)s: %(message)s"
-)
-
-# 4.将formatter添加到handler中
-ch.setFormatter(formatter)
-fh.setFormatter(formatter)
-
-# 5.将handler添加到logger中
-LOGGER.addHandler(ch)
-LOGGER_TXT.addHandler(fh)
+# Backward-compatible alias used by older call sites.
+LOGGER_TXT = LOGGER

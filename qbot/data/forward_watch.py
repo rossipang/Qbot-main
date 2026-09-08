@@ -39,8 +39,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 
 from qbot.data.industry_screener import (
-    _fetch_kline_bars,
     _fetch_kline_bars_fast,
+    _fetch_kline_bars_once,
     _fetch_ulist_quote_map,
     clear_board_constituents_cache,
     fetch_board_constituents,
@@ -76,11 +76,12 @@ LATEST_PATH = (
 )
 
 # 管道版本：缓存里可对照是否按新规则刷新
-PIPELINE_VERSION = "forward_v7_27_agri_food_chem"
+PIPELINE_VERSION = "forward_v7_30_board_seed_keep"
 
-# 风险分用日K缓存：code:asof → bars（单次刷新内复用）
+# 风险分用日K缓存：code:asof → bars（单次刷新内复用；不含 limit，避免 28/90 双重拉）
 _RISK_BARS_CACHE: Dict[str, List[Dict[str, Any]]] = {}
-_RISK_PREFETCH_WORKERS = 16
+_RISK_BARS_FETCH_LIMIT = 90  # ML/风险共用；预拉一次即可
+_RISK_PREFETCH_WORKERS = 24
 
 # 新进主题/个股星级封顶（连入/主题走好 < 2 日）
 NEWCOMER_STAR_CAP = 3
@@ -109,7 +110,10 @@ CONCEPT_TO_INDUSTRIES: Dict[str, List[str]] = {
     "半导体材料": ["半导体材料"],
     "半导体设备": ["半导体设备"],
     "半导体设备概念": ["半导体设备"],
-    "电子化学品": ["电子化学品Ⅱ", "电子化学品Ⅲ"],
+    "电子化学品": ["电子化学品Ⅲ", "电子化学品Ⅱ", "半导体材料"],
+    "电子化学品Ⅱ": ["电子化学品Ⅱ", "半导体材料"],
+    "电子化学品Ⅲ": ["电子化学品Ⅲ", "半导体材料"],
+    "光刻胶": ["半导体材料", "电子化学品Ⅲ"],
     "电子特气": ["电子化学品Ⅱ", "半导体材料"],
     "硅片": ["半导体材料"],
     # AI/PCB 高端铜箔并入材料上游观察，不单独开主题
@@ -129,6 +133,12 @@ CONCEPT_TO_INDUSTRIES: Dict[str, List[str]] = {
     "AI语料": ["数字媒体", "传媒"],
     "数字媒体": ["数字媒体"],
     "影视概念": ["数字媒体", "传媒"],
+    "影视院线": ["传媒", "数字媒体"],
+    "影视动漫制作": ["传媒", "数字媒体"],
+    "医疗研发外包": ["医疗研发外包", "化学制药"],
+    "医疗服务": ["医疗服务", "化学制药"],
+    "生物制品": ["生物制品", "化学制药"],
+    "创新药": ["化学制药", "生物制品", "医疗研发外包"],
     # 算力概念共用，行业侧必须拆开（见 THEME_HINTS industry_label）
     "算力": ["计算机设备"],
     "国产算力": ["计算机设备"],
@@ -162,10 +172,12 @@ CONCEPT_TO_INDUSTRIES: Dict[str, List[str]] = {
     "小金属": ["小金属"],
     "锗": ["小金属"],
     "钨": ["小金属"],
-    "光纤": ["通信线缆及配套"],
-    "光缆": ["通信线缆及配套"],
+    "光纤": ["通信线缆及配套", "线缆部件及其他"],
+    "光缆": ["通信线缆及配套", "线缆部件及其他"],
     "光纤光缆": ["通信线缆及配套"],
     "通信线缆": ["通信线缆及配套"],
+    "光纤概念": ["通信线缆及配套", "线缆部件及其他"],
+    "线缆部件及其他": ["线缆部件及其他", "通信线缆及配套"],
     "在线教育": ["在线教育", "教育"],
     "水利建设": ["水利建设"],
     "液冷": ["其他电源设备Ⅱ", "计算机设备"],
@@ -509,6 +521,8 @@ THEME_HINTS: List[Dict[str, Any]] = [
             "GLP-1",
             "减肥药",
             "CXO",
+            "CRO",
+            "CDMO",
             "临床",
             "获批",
             "医保目录",
@@ -516,12 +530,16 @@ THEME_HINTS: List[Dict[str, Any]] = [
             "恒瑞",
             "百济",
             "药明",
+            "泰格",
+            "昭衍",
         ],
         "news_keys": [
             "创新药",
             "生物医药",
             "医保",
             "CXO",
+            "CRO",
+            "CDMO",
             "ADC",
             "GLP-1",
             "新药获批",
@@ -532,21 +550,31 @@ THEME_HINTS: List[Dict[str, Any]] = [
             "化学制药",
             "生物制品",
             "医疗研发外包",
+            "医疗服务",
             "医药",
         ],
-        # 行业全局唯一：只占一个行业坑，CXO/生物制品靠 board_keys+种子覆盖
-        "industries": ["化学制药"],
+        # 创新药中军 + CXO/CRO/CDMO；行业坑允许多板，避免只占化学制药看不见外包
+        "industries": ["化学制药", "医疗研发外包", "生物制品"],
         "seed_stocks": [
             ("600276", "恒瑞医药"),
             ("688235", "百济神州"),
             ("603259", "药明康德"),
             ("002821", "凯莱英"),
             ("300759", "康龙化成"),
+            ("300347", "泰格医药"),
+            ("603127", "昭衍新药"),
+            ("300363", "博腾股份"),
+            ("603456", "九洲药业"),
             ("688180", "君实生物"),
             ("300122", "智飞生物"),
+            ("600196", "复星医药"),
+            ("688331", "荣昌生物"),
+            ("000963", "华东医药"),
+            ("688578", "艾力斯"),
         ],
         "thesis": (
             "创新药/CXO 是独立于算力的景气与政策轮动主线；"
+            "临床CRO（泰格/昭衍）与 CDMO（药明/凯莱/康龙/博腾）都是正版，勿只留几只中军；"
             "有医保、获批、临床或资金连续认可时进观察池。"
             "大涨后等回踩，不把一日脉冲当买点；短线仍看形态是否给点。"
         ),
@@ -839,8 +867,10 @@ THEME_HINTS: List[Dict[str, Any]] = [
             "英伟达",
             "中际旭创",
             "新易盛",
+            "剑桥科技",
+            "光电模块",
         ],
-        "board_keys": ["CPO", "光模块", "光通信", "光通信模块", "光学光电子"],
+        "board_keys": ["CPO", "光模块", "光通信", "光通信模块", "光学光电子", "F5G"],
         "industries": ["通信设备"],
         # 种子只放可交易价位（<800）；中际/源杰一手过贵不进名单，免占位再踢
         "seed_stocks": [
@@ -849,9 +879,11 @@ THEME_HINTS: List[Dict[str, Any]] = [
             ("002281", "光迅科技"),
             ("300570", "太辰光"),
             ("688048", "长光华芯"),
+            ("603083", "剑桥科技"),
         ],
         "thesis": (
             "AI算力互联刚需：光模块/CPO是科技主升里的核心产业链，"
+            "剑桥偏光模块/数通弹性腿（跟CPO/光通信，不跟电网）；"
             "看资金与龙头回踩，勿把西部大开发/节能环保等箩筐概念当行业归属。"
         ),
     },
@@ -912,31 +944,52 @@ THEME_HINTS: List[Dict[str, Any]] = [
             "AI内容",
             "芒果",
             "昆仑万维",
+            "影视",
+            "院线",
+            "电影",
+            "光线",
+            "博纳",
+            "华策",
         ],
-        "news_keys": ["短剧", "AIGC", "AI语料", "微短剧", "数字媒体"],
+        "news_keys": [
+            "短剧",
+            "AIGC",
+            "AI语料",
+            "微短剧",
+            "数字媒体",
+            "影视",
+            "院线",
+            "电影票房",
+        ],
         "board_keys": [
             "短剧互动游戏",
             "AIGC概念",
             "AI语料",
             "数字媒体",
             "影视概念",
+            "影视院线",
+            "影视动漫制作",
             "传媒",
         ],
         "industries": ["数字媒体", "传媒"],
         "seed_stocks": [
-            # 内容/牌照侧；协创是算力租赁硬侧，已挪到 compute_rental，禁止再塞回本主题
+            # 内容/牌照/院线正版；协创是算力租赁硬侧，禁止塞回本主题
             ("300418", "昆仑万维"),
-            ("300017", "网宿科技"),
             ("300413", "芒果超媒"),
             ("300133", "华策影视"),
+            ("300251", "光线传媒"),
+            ("600977", "中国电影"),
+            ("001330", "博纳影业"),
+            ("300364", "中文在线"),
             ("002517", "恺英网络"),
+            ("002624", "完美世界"),
             ("300182", "捷成股份"),
-            ("301262", "海看股份"),
+            ("300017", "网宿科技"),
         ],
         "thesis": (
-            "短剧/AIGC/语料属AI应用内容侧（芒果/昆仑等）：资金常在硬件拥挤后切向传媒数字媒体；"
-            "协创等算力租赁不在本池；只留有盈利口径+资金认可的内容中军，涨停/亏损情绪票不追；"
-            "主升看连续流入与回踩，脉冲日只观察。"
+            "短剧/AIGC/语料 + 影视院线同属传媒内容侧（芒果/昆仑/光线/华策等）；"
+            "院线票房与短剧流量可轮动，真标的优先内容/牌照/院线中军，蹭热广告壳不追；"
+            "协创等算力租赁不在本池；主升看连续流入与回踩，脉冲日只观察。"
         ),
     },
     {
@@ -1057,9 +1110,19 @@ THEME_HINTS: List[Dict[str, Any]] = [
         ],
         "board_keys": [
             "半导体材料",
+            "电子化学品",
+            "电子化学品Ⅱ",
+            "电子化学品Ⅲ",
+            "光刻胶",
             "铜箔",
+            "电子铜箔",
         ],
-        "industries": ["半导体材料"],
+        "industries": [
+            "半导体材料",
+            "电子化学品Ⅲ",
+            "电子化学品Ⅱ",
+            "电子化学品",
+        ],
         "seed_stocks": [
             ("600206", "有研新材"),
             ("688432", "有研硅"),
@@ -1105,7 +1168,11 @@ THEME_HINTS: List[Dict[str, Any]] = [
             "晶圆厂扩产",
             "资本开支",
         ],
-        "board_keys": ["半导体设备"],
+        "board_keys": [
+            "半导体设备",
+            "半导体概念",
+            "光刻机",
+        ],
         "industries": ["半导体设备"],
         "industry_label": "半导体设备",
         "seed_stocks": [
@@ -1182,6 +1249,8 @@ THEME_HINTS: List[Dict[str, Any]] = [
             "裸纤",
             "G.652",
             "光纤涨价",
+            "电力电缆",
+            "杭电",
             # 算力基建间接需求（不与光模块主题混用模块关键词）
             "算力",
             "数据中心",
@@ -1195,20 +1264,30 @@ THEME_HINTS: List[Dict[str, Any]] = [
             "通信线缆",
             "光纤涨价",
             "裸纤",
+            "电力电缆",
             "算力",
             "数据中心",
         ],
-        "board_keys": ["光纤", "光缆", "通信线缆", "光纤概念"],
-        "industries": ["通信线缆及配套"],
+        "board_keys": [
+            "光纤",
+            "光缆",
+            "通信线缆",
+            "光纤概念",
+            "线缆部件及其他",
+        ],
+        "industries": ["通信线缆及配套", "线缆部件及其他"],
         "seed_stocks": [
             ("600487", "亨通光电"),
             ("601869", "长飞光纤"),
             ("600522", "中天科技"),
             ("600498", "烽火通信"),
+            # 电力电缆+光/箔：跟线缆/光纤热度，电网板平它也能独涨
+            ("603618", "杭电股份"),
         ],
         "thesis": (
             "光纤光缆有独立涨价/供需周期（AI基建、出口、供给偏紧），"
-            "与光模块不是同一条腿；杀跌后起稳可观察中军，涨停日不追。"
+            "与光模块不是同一条腿；杭电偏电力电缆/线缆弹性，常跟线缆部件与光纤概念，"
+            "不必等变压器中军一起动；杀跌后起稳可观察，涨停日不追。"
         ),
     },
     {
@@ -3161,6 +3240,65 @@ def _find_industry_row(
     return _scan(con, allow_contains=True)
 
 
+def _synthetic_board_row(
+    name: str,
+    *,
+    board_type: str = "行业",
+    why: str = "",
+) -> Dict[str, Any]:
+    """板块列表缺行时的种子保位占位行（涨跌/资金留空，不假装有行情）。"""
+    nm = str(name or "").strip() or "未知板块"
+    return {
+        "板块名称": nm,
+        "类型": board_type,
+        "板块代码": "",
+        "涨跌幅": None,
+        "涨跌幅_5日": None,
+        "主力净流入_亿": None,
+        "主力净流入_5日_亿": None,
+        "_synthetic": True,
+        "_synthetic_why": str(why or "板名对不上，种子保位注入"),
+    }
+
+
+def _resolve_board_row_for_hint(
+    boards: Optional[pd.DataFrame],
+    hint: Optional[Dict[str, Any]],
+    *,
+    extra_names: Optional[List[str]] = None,
+    allow_synthetic: bool = False,
+    synthetic_why: str = "",
+) -> Optional[Dict[str, Any]]:
+    """结构/挖坑主题找板：真实行优先；找不到且允许时用种子占位行，避免整主题消失。"""
+    names: List[str] = []
+    if hint:
+        names.extend(str(x) for x in (hint.get("industries") or []) if x)
+        names.extend(str(x) for x in (hint.get("board_keys") or []) if x)
+        lab = str(hint.get("industry_label") or "").strip()
+        if lab:
+            names.insert(0, lab)
+        nm = str(hint.get("name") or "").strip()
+        if nm:
+            names.append(nm)
+    if extra_names:
+        names = [str(x) for x in extra_names if x] + names
+    # 去重保序
+    seen: set = set()
+    uniq: List[str] = []
+    for n in names:
+        k = _normalize_concept_key(n)
+        if not n or k in seen:
+            continue
+        seen.add(k)
+        uniq.append(n)
+    row = _find_industry_row(boards, uniq) if boards is not None else None
+    if row is not None:
+        return row
+    if not allow_synthetic or not uniq:
+        return None
+    return _synthetic_board_row(uniq[0], why=synthetic_why or f"未找到板块行，按种子保位：{uniq[0]}")
+
+
 def _theme_from_concept_industry(
     *,
     concept_name: str,
@@ -3641,13 +3779,24 @@ def discover_theme_universe(
                 label = str((hint or {}).get("industry_label") or "")
                 if label and _normalize_concept_key(label) in seen_industries:
                     continue
-                ind_names = list((hint or {}).get("industries") or [])
-                if not ind_names:
-                    ind_names = _industries_for_concept(name)
-                if label:
-                    ind_names = [label] + ind_names
-                ind_names = [name] + ind_names
-                ind_row = _find_industry_row(boards, ind_names)
+                hid = str((hint or {}).get("id") or "")
+                allow_syn = hid in _STRUCTURE_KEEP_HINT_IDS or hid in _DIG_WAIT_HINT_IDS
+                # 昨日行业名优先，避免东财改名/分页漏板后断粘
+                y_inds = list(yday.get("theme_industries") or [])
+                y_ind = ""
+                try:
+                    yi = y_names.index(name) if name in y_names else -1
+                    if yi >= 0 and yi < len(y_inds):
+                        y_ind = str(y_inds[yi] or "")
+                except Exception:
+                    y_ind = ""
+                ind_row = _resolve_board_row_for_hint(
+                    boards,
+                    hint,
+                    extra_names=[y_ind, name] if (y_ind or name) else [name],
+                    allow_synthetic=allow_syn,
+                    synthetic_why="昨日在池延续：今日板名对不上，种子保位注入",
+                )
                 if not ind_row:
                     continue
                 industry_name = str(ind_row.get("板块名称") or "")
@@ -3663,7 +3812,12 @@ def discover_theme_universe(
                     concept_name=cname,
                     industry_row=ind_row,
                     news_hits=news_hits,
-                    quality_why=["昨日在池延续判定"],
+                    quality_why=["昨日在池延续判定"]
+                    + (
+                        [str(ind_row.get("_synthetic_why") or "板名对不上，种子保位")]
+                        if ind_row.get("_synthetic")
+                        else []
+                    ),
                     carry=True,
                     force_hint=hint,
                 )
@@ -3771,8 +3925,14 @@ def discover_theme_universe(
             if hid not in _STRUCTURE_KEEP_HINT_IDS or hid in have_ids:
                 continue
             label = str(h.get("industry_label") or "")
-            ind_names = list(h.get("industries") or []) + list(h.get("board_keys") or [])
-            ind_row = _find_industry_row(boards, ind_names)
+            dig_wait = hid in _DIG_WAIT_HINT_IDS
+            user_pin = hid in _USER_PIN_HINT_IDS
+            ind_row = _resolve_board_row_for_hint(
+                boards,
+                h,
+                allow_synthetic=True,
+                synthetic_why="结构硬主题保位：板名对不上，种子保位注入",
+            )
             if not ind_row:
                 continue
             industry_name = str(ind_row.get("板块名称") or "")
@@ -3782,11 +3942,10 @@ def discover_theme_universe(
             ind_key = _normalize_concept_key(industry_name)
             ipct = _to_float(ind_row.get("涨跌幅"))
             iflow = _to_float(ind_row.get("主力净流入_亿"))
-            dig_wait = hid in _DIG_WAIT_HINT_IDS
-            user_pin = hid in _USER_PIN_HINT_IDS
             if (
                 not dig_wait
                 and not user_pin
+                and not ind_row.get("_synthetic")
                 and ipct is not None
                 and float(ipct) <= -4.0
                 and (iflow is None or float(iflow) < 0)
@@ -3812,6 +3971,12 @@ def discover_theme_universe(
                     else "多元主题保位：科技/农业/军工/应用/贵金属/材料等结构主题同等留池"
                 )
             )
+            if ind_row.get("_synthetic"):
+                why_keep = (
+                    str(ind_row.get("_synthetic_why") or why_keep)
+                    + "；"
+                    + why_keep
+                )
             # 仅无关杂板受 hard_cap；结构硬主题/挖坑/点名强保一律注入
             if (
                 len(themes) >= hard_cap
@@ -4803,14 +4968,14 @@ def _is_homogeneous_theme(theme: Optional[Dict[str, Any]] = None, *names: str) -
 
 
 def _stock_limit_for_theme(theme: Optional[Dict[str, Any]]) -> int:
-    """银行/证券等同质板最多 3 只；海外组装只盯富联频道；农业加工链略放宽。"""
+    """银行/证券等同质板最多 3 只；海外组装只盯富联频道；农业/医药/传媒略放宽。"""
     if not theme:
         return _DEFAULT_STOCK_CAP
     tid = str(theme.get("id") or theme.get("_hint_id") or "")
     if tid == "overseas_odm":
         return _OVERSEAS_ODM_STOCK_CAP
-    if tid in ("agriculture", "agri_chem"):
-        return 12
+    if tid in ("agriculture", "agri_chem", "innovative_drug", "short_drama_aigc"):
+        return 14
     if _is_homogeneous_theme(theme):
         return _HOMOGENEOUS_STOCK_CAP
     return _DEFAULT_STOCK_CAP
@@ -5627,10 +5792,35 @@ _DAILY_SHORT_BOARD_SEEDS: Dict[str, List[Tuple[str, str]]] = {
         ("688235", "百济神州"),
         ("603259", "药明康德"),
         ("002821", "凯莱英"),
+        ("300759", "康龙化成"),
+        ("300347", "泰格医药"),
+        ("603127", "昭衍新药"),
+        ("300363", "博腾股份"),
     ],
     "化学制药": [
         ("600276", "恒瑞医药"),
         ("000963", "华东医药"),
+        ("600196", "复星医药"),
+        ("688578", "艾力斯"),
+    ],
+    "医疗研发外包": [
+        ("603259", "药明康德"),
+        ("300759", "康龙化成"),
+        ("002821", "凯莱英"),
+        ("300347", "泰格医药"),
+        ("603127", "昭衍新药"),
+        ("300363", "博腾股份"),
+        ("603456", "九洲药业"),
+    ],
+    "生物制品": [
+        ("688235", "百济神州"),
+        ("688180", "君实生物"),
+        ("300122", "智飞生物"),
+        ("688331", "荣昌生物"),
+    ],
+    "医疗服务": [
+        ("300347", "泰格医药"),
+        ("603127", "昭衍新药"),
     ],
     "银行": [
         ("601166", "兴业银行"),
@@ -5641,6 +5831,46 @@ _DAILY_SHORT_BOARD_SEEDS: Dict[str, List[Tuple[str, str]]] = {
         ("600089", "特变电工"),
         ("601179", "中国西电"),
         ("600312", "平高电气"),
+    ],
+    "电网设备": [
+        ("600089", "特变电工"),
+        ("601179", "中国西电"),
+        ("600312", "平高电气"),
+    ],
+    "光纤": [
+        ("600487", "亨通光电"),
+        ("601869", "长飞光纤"),
+        ("600522", "中天科技"),
+        ("600498", "烽火通信"),
+        ("603618", "杭电股份"),
+    ],
+    "光纤概念": [
+        ("600487", "亨通光电"),
+        ("601869", "长飞光纤"),
+        ("603618", "杭电股份"),
+    ],
+    "线缆部件及其他": [
+        ("603618", "杭电股份"),
+        ("600487", "亨通光电"),
+        ("600522", "中天科技"),
+    ],
+    "CPO": [
+        ("300502", "新易盛"),
+        ("300394", "天孚通信"),
+        ("002281", "光迅科技"),
+        ("603083", "剑桥科技"),
+        ("300570", "太辰光"),
+    ],
+    "光模块": [
+        ("300502", "新易盛"),
+        ("300394", "天孚通信"),
+        ("002281", "光迅科技"),
+        ("603083", "剑桥科技"),
+    ],
+    "通信设备": [
+        ("300502", "新易盛"),
+        ("603083", "剑桥科技"),
+        ("002281", "光迅科技"),
     ],
     "电力": [
         ("600089", "特变电工"),
@@ -5771,18 +6001,39 @@ _DAILY_SHORT_BOARD_SEEDS: Dict[str, List[Tuple[str, str]]] = {
         ("300418", "昆仑万维"),
         ("300413", "芒果超媒"),
         ("300133", "华策影视"),
+        ("300251", "光线传媒"),
+        ("600977", "中国电影"),
         ("002517", "恺英网络"),
     ],
     "数字媒体": [
         ("300418", "昆仑万维"),
         ("300413", "芒果超媒"),
+        ("300364", "中文在线"),
         ("300017", "网宿科技"),
     ],
     "短剧": [
         ("300418", "昆仑万维"),
         ("300413", "芒果超媒"),
         ("300133", "华策影视"),
+        ("300364", "中文在线"),
         ("002517", "恺英网络"),
+    ],
+    "影视院线": [
+        ("600977", "中国电影"),
+        ("001330", "博纳影业"),
+        ("300251", "光线传媒"),
+    ],
+    "影视动漫制作": [
+        ("300251", "光线传媒"),
+        ("300133", "华策影视"),
+        ("001330", "博纳影业"),
+        ("600977", "中国电影"),
+    ],
+    "影视概念": [
+        ("300251", "光线传媒"),
+        ("300133", "华策影视"),
+        ("600977", "中国电影"),
+        ("300413", "芒果超媒"),
     ],
     "算力租赁": [
         ("300857", "协创数据"),
@@ -5869,7 +6120,7 @@ _DAILY_SHORT_NEWS_SEEDS: List[Tuple[Tuple[str, ...], str, List[Tuple[str, str]]]
         ],
     ),
     (
-        ("光模块", "CPO", "光通信", "光纤"),
+        ("光模块", "CPO", "光通信", "光纤", "剑桥", "杭电", "线缆"),
         "光通信",
         [
             ("300502", "新易盛"),
@@ -5877,8 +6128,10 @@ _DAILY_SHORT_NEWS_SEEDS: List[Tuple[Tuple[str, ...], str, List[Tuple[str, str]]]
             ("002281", "光迅科技"),
             ("300570", "太辰光"),
             ("688048", "长光华芯"),
+            ("603083", "剑桥科技"),
             ("601869", "长飞光纤"),
             ("600487", "亨通光电"),
+            ("603618", "杭电股份"),
         ],
     ),
     (
@@ -5953,7 +6206,7 @@ _DAILY_SHORT_NEWS_SEEDS: List[Tuple[Tuple[str, ...], str, List[Tuple[str, str]]]
         ],
     ),
     (
-        ("创新药", "生物医药", "医保", "CXO", "新药", "ADC", "GLP-1"),
+        ("创新药", "生物医药", "医保", "CXO", "CRO", "CDMO", "新药", "ADC", "GLP-1", "泰格"),
         "创新药",
         [
             ("600276", "恒瑞医药"),
@@ -5961,6 +6214,22 @@ _DAILY_SHORT_NEWS_SEEDS: List[Tuple[Tuple[str, ...], str, List[Tuple[str, str]]]
             ("603259", "药明康德"),
             ("002821", "凯莱英"),
             ("300759", "康龙化成"),
+            ("300347", "泰格医药"),
+            ("603127", "昭衍新药"),
+            ("300363", "博腾股份"),
+        ],
+    ),
+    (
+        ("短剧", "影视", "院线", "电影", "芒果", "AIGC", "微短剧"),
+        "影视传媒",
+        [
+            ("300413", "芒果超媒"),
+            ("300418", "昆仑万维"),
+            ("300251", "光线传媒"),
+            ("300133", "华策影视"),
+            ("600977", "中国电影"),
+            ("001330", "博纳影业"),
+            ("300364", "中文在线"),
         ],
     ),
     (
@@ -6402,20 +6671,21 @@ def _prefetch_risk_bars(
     codes: List[str],
     asof: str,
     *,
-    limit: int = 28,
+    limit: int = _RISK_BARS_FETCH_LIMIT,
     max_workers: int = _RISK_PREFETCH_WORKERS,
 ) -> int:
     """并行预拉日K，避免评分阶段逐股串行等网络（刷新慢的主因）。"""
     end = _asof_yyyymmdd(asof)
     if len(end) != 8:
         return 0
+    fetch_n = max(int(limit or 0), _RISK_BARS_FETCH_LIMIT)
     todo: List[str] = []
     seen: set = set()
     for c in codes:
         code = str(c or "").zfill(6)[-6:]
         if len(code) != 6 or not code.isdigit() or code in seen:
             continue
-        key = f"{code}:{end}:{int(limit)}"
+        key = f"{code}:{end}"
         if key in _RISK_BARS_CACHE:
             continue
         seen.add(code)
@@ -6423,13 +6693,20 @@ def _prefetch_risk_bars(
     if not todo:
         return 0
 
-    workers = min(max_workers, max(4, (len(todo) + 7) // 8))
+    workers = min(max_workers, max(8, min(len(todo), max_workers)))
 
     def _one(code: str) -> None:
-        _get_risk_bars(code, asof, limit=limit, fast_fetch=True)
+        # 预拉阶段禁止慢路径 3 次重试，避免并行打爆东财后全体串行拖死
+        _get_risk_bars(
+            code,
+            asof,
+            limit=fetch_n,
+            fast_fetch=True,
+            allow_slow_fallback=False,
+        )
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        list(pool.map(_one, todo, chunksize=max(1, len(todo) // workers)))
+        list(pool.map(_one, todo, chunksize=max(1, (len(todo) + workers - 1) // workers)))
     return len(todo)
 
 
@@ -6438,38 +6715,49 @@ def _asof_yyyymmdd(asof: str) -> str:
 
 
 def _get_risk_bars(
-    code: str, asof: str, limit: int = 28, *, fast_fetch: bool = False
+    code: str,
+    asof: str,
+    limit: int = 28,
+    *,
+    fast_fetch: bool = False,
+    allow_slow_fallback: bool = True,
 ) -> List[Dict[str, Any]]:
     """取截止 asof 的日K（含开收），供阳线连阳与 CFA 波动/回撤。
 
-    fast_fetch 仅走东财短超时；若为空必须回退完整拉取，否则会把空结果缓存成
-    「持有出场=K线不足」且风险/ML 也失真。
+    缓存键不含 limit：预拉 90 根后，风险(28)/ML(90) 共用，避免二次串行拉网。
+    fast_fetch 先走东财短超时；失败时默认只做一次多源回退（非 3 次重试）。
     """
     code = str(code or "").zfill(6)
     end = _asof_yyyymmdd(asof)
     if len(code) != 6 or len(end) != 8:
         return []
-    key = f"{code}:{end}:{int(limit)}"
+    need = max(int(limit or 1), 1)
+    fetch_n = max(need, _RISK_BARS_FETCH_LIMIT)
+    key = f"{code}:{end}"
+    # 键已存在=本刷新已拉过（即使根数不足也不再串行重打）
     if key in _RISK_BARS_CACHE:
-        return _RISK_BARS_CACHE[key]
+        cached = _RISK_BARS_CACHE[key]
+        return cached[-need:] if len(cached) > need else list(cached)
+
     bars: List[Dict[str, Any]] = []
     try:
         if fast_fetch:
-            bars = _fetch_kline_bars_fast(code, end, limit=int(limit)) or []
+            bars = _fetch_kline_bars_fast(code, end, limit=int(fetch_n)) or []
         else:
-            bars = _fetch_kline_bars(code, end, limit=int(limit)) or []
+            bars = _fetch_kline_bars_once(code, end, limit=int(fetch_n)) or []
     except Exception:
         bars = []
-    # 只要 <= asof
     out = [b for b in bars if str(b.get("date") or "")[:8] <= end]
-    if not out and fast_fetch:
+    if not out and allow_slow_fallback:
         try:
-            bars = _fetch_kline_bars(code, end, limit=int(limit)) or []
+            # 单次多源回退；禁止走 _fetch_kline_bars 的 3 次 sleep 重试
+            bars = _fetch_kline_bars_once(code, end, limit=int(fetch_n)) or []
         except Exception:
             bars = []
         out = [b for b in bars if str(b.get("date") or "")[:8] <= end]
+    # 无论成败都写入，避免同刷新内重复打点；空列表=已知拉不到
     _RISK_BARS_CACHE[key] = out
-    return out
+    return out[-need:] if len(out) > need else list(out)
 
 
 def _is_user_yang(bar: Dict[str, Any], prev: Optional[Dict[str, Any]]) -> bool:
@@ -6617,7 +6905,7 @@ def _build_risk_context(
     today_pct: Optional[float] = None,
 ) -> Dict[str, Any]:
     """组装风险分所需：阳/阴连线 + CFA 度量。K 线失败则回退收盘涨跌连涨。"""
-    bars = _get_risk_bars(code, asof, limit=28)
+    bars = _get_risk_bars(code, asof, limit=28, fast_fetch=True)
     yang_s, yin_s = _yang_yin_streak_from_bars(bars)
     prior_yang = _prior_yang_streak(bars)
     cfa = _cfa_metrics_from_bars(bars)
@@ -7251,14 +7539,15 @@ def build_daily_short_picks(
         qmap = {}
 
     try:
-        _prefetch_risk_bars(codes, asof)
+        _prefetch_risk_bars(codes, asof, limit=_RISK_BARS_FETCH_LIMIT)
     except Exception:
         pass
 
     # P1：加载夜间扩宇宙 GBDT；禁止用短池几十只×短窗口覆盖大模型
     try:
         bars_map = {
-            c: _get_risk_bars(c, asof, limit=90, fast_fetch=True) for c in codes
+            c: _get_risk_bars(c, asof, limit=_RISK_BARS_FETCH_LIMIT, fast_fetch=True)
+            for c in codes
         }
         ensure_short_model(bars_map, retrain=False)
     except Exception:
@@ -7474,7 +7763,7 @@ def build_daily_short_picks(
         # P1：GBDT 短线分融合排序（ML 权重大，拉开先后）
         rs_val = timing.get("rs_val")
         ml_pack = score_short_ml(
-            _get_risk_bars(code, asof, limit=90, fast_fetch=True),
+            _get_risk_bars(code, asof, limit=_RISK_BARS_FETCH_LIMIT, fast_fetch=True),
             live={
                 "board_pct": board_pct,
                 "rs": rs_val,
@@ -7856,9 +8145,9 @@ def build_forward_watch(
             err_parts.append(f"行情:{exc}")
             quote_map = {}
 
-    _prog(58, f"并行预拉日K（约{len(uniq_codes)}只，算风险值）…")
+    _prog(58, f"并行预拉日K（约{len(uniq_codes)}只×{_RISK_BARS_FETCH_LIMIT}根，算风险/ML）…")
     try:
-        n_pref = _prefetch_risk_bars(uniq_codes, asof)
+        n_pref = _prefetch_risk_bars(uniq_codes, asof, limit=_RISK_BARS_FETCH_LIMIT)
         if n_pref:
             _prog(62, f"日K预拉完成 {n_pref} 只")
     except Exception as exc:  # noqa: BLE001
@@ -8281,7 +8570,9 @@ def build_forward_watch(
             # P1：观察池写 ML/因子贡献；ML 只作客观分与软降权，不作硬否决
             try:
                 ml_pack = score_short_ml(
-                    _get_risk_bars(code, asof, limit=90, fast_fetch=True),
+                    _get_risk_bars(
+                        code, asof, limit=_RISK_BARS_FETCH_LIMIT, fast_fetch=True
+                    ),
                     live={
                         "board_pct": board_pct,
                         "rs": timing.get("rs_val"),

@@ -399,7 +399,7 @@ class SimTradePanel(wx.Panel):
             self.trader_opts["trade_code"] = "BTCUSDT"
             self.init_code_input.SetValue("BTCUSDT")
 
-        print(self.trader_opts)
+        logger.debug("trader_opts: %s", self.trader_opts)
         self.show_trade_boardview()
 
     def on_combobox_trade_platform_changed(self, event):
@@ -451,10 +451,10 @@ class SimTradePanel(wx.Panel):
         # self.trade_engine.close()
 
     def show_trade_boardview(self):
-        print(
-            "$$$$$$$$$$$$\n####",
-            self.trader_opts["trade_type"],
-            self.trader_opts["class"],
+        logger.debug(
+            "boardview %s %s",
+            self.trader_opts.get("trade_type"),
+            self.trader_opts.get("class"),
         )
         if self.trader_opts["trade_type"] == "股票":
             juejin_sim = (

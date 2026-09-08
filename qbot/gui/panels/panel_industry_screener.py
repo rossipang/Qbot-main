@@ -130,6 +130,11 @@ class SortableListCtrl(wx.grid.Grid):
         self.EnableDragRowSize(False)
         self.EnableDragColMove(False)
         self.SetSelectionMode(wx.grid.Grid.SelectRows)
+        # wxWidgets 3.3+ 默认 overlay 选中会把整行对应的表头整片刷蓝；关掉后恢复旧观感
+        try:
+            self.DisableOverlaySelection()
+        except Exception:
+            pass
         self.SetDefaultCellAlignment(wx.ALIGN_LEFT, wx.ALIGN_CENTER)
         self._rows = []  # (display_row, sort_key, cell_colors, row_style)
         self._col_titles = []
@@ -654,24 +659,42 @@ class IndustryScreenerPanel(wx.Panel):
     def refresh_all(self):
         if self._busy_all:
             return
-        self._set_busy_all(True, "正在刷新新闻与板块（含三连阳启动扫描，约1分钟）…")
+        self._set_busy_all(True, "正在并行刷新新闻与板块…")
 
         def work():
+            from concurrent.futures import ThreadPoolExecutor
+
             invalidate_virtual_board_caches()
             news = pd.DataFrame()
             boards = pd.DataFrame()
             err = ""
             sly_n = 0
+
+            def _load_news():
+                return fetch_hot_news(40)
+
+            def _load_boards():
+                return fetch_industry_boards()
+
             try:
-                news = fetch_hot_news(40)
+                with ThreadPoolExecutor(max_workers=2) as pool:
+                    fut_n = pool.submit(_load_news)
+                    fut_b = pool.submit(_load_boards)
+                    try:
+                        news = fut_n.result(timeout=90)
+                    except Exception as exc:
+                        logger.error("热点新闻失败: %s", exc)
+                        err = f"新闻: {exc}; "
+                        news = pd.DataFrame()
+                    try:
+                        boards = fut_b.result(timeout=120)
+                    except Exception as exc:
+                        logger.error("板块分析失败: %s", exc)
+                        err += f"板块: {exc}"
+                        boards = pd.DataFrame()
             except Exception as exc:
-                logger.error("热点新闻失败: %s", exc)
-                err = f"新闻: {exc}; "
-            try:
-                boards = fetch_industry_boards()
-            except Exception as exc:
-                logger.error("板块分析失败: %s", exc)
-                err += f"板块: {exc}"
+                logger.error("并行刷新失败: %s", exc)
+                err += f"并行: {exc}"
             try:
                 from qbot.data.industry_screener import get_sanlianyang_cached
 
