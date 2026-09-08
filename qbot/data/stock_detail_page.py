@@ -17,6 +17,7 @@ from bokeh.models import (
     ColumnDataSource,
     Div,
     HoverTool,
+    Range1d,
     Span,
     Tabs,
 )
@@ -30,16 +31,18 @@ from bokeh.resources import INLINE
 
 from qbot.data.quote_charts import (
     DOWN_COLOR,
+    INDEX_BAR_WIDTH,
     MA20_COLOR,
     MA5_COLOR,
     UP_COLOR,
-    _bar_width,
+    _apply_kline_index_xaxis,
     _build_finance_plots,
     _build_fund_flow_plots,
     _build_stock_news_section,
     _candle_source,
     _fmt_html_num,
     _html_escape,
+    _kline_index_ticks,
     _prepare_ohlcv,
     _sign_cls,
     _tools,
@@ -359,7 +362,7 @@ def _build_header_div(quote: dict, name: str, code: str, updated: str, trading: 
       </div>
     </div>
     """
-    return Div(text=html, width=1200, height=108)
+    return Div(text=html, width=1200, height=158, sizing_mode="stretch_width")
 
 
 def _intraday_tab(trends: pd.DataFrame, fflow: pd.DataFrame, pre_close) -> Any:
@@ -488,25 +491,32 @@ def _intraday_tab(trends: pd.DataFrame, fflow: pd.DataFrame, pre_close) -> Any:
 
 
 def _kline_tab(df: pd.DataFrame, title: str) -> Any:
+    """日/周/月K：序号等距横轴，避免未完结周/月在日历轴上挤在一起或把柱宽压瘦。"""
     if df is None or df.empty:
         return column(_empty_note(f"暂无{title}数据"), sizing_mode="stretch_width")
     data = _prepare_ohlcv(df)
+    data = data.copy()
+    data["i"] = list(range(len(data)))
     source = _candle_source(data)
-    width = _bar_width(data)
+    width = INDEX_BAR_WIDTH
+    n = len(data)
+    x_range = Range1d(start=-0.6, end=max(n - 1, 0) + 0.6)
+    tick_idxs, overrides = _kline_index_ticks(data["date_str"].tolist())
+
     p_k = figure(
         title=title,
-        x_axis_type="datetime",
         width=1200,
         height=360,
         tools=_tools(),
         active_drag="pan",
         active_scroll="wheel_zoom",
         toolbar_location="above",
+        x_range=x_range,
     )
-    p_k.segment("date", "high", "date", "low", color="color", source=source, line_width=1)
-    p_k.vbar("date", width, "open", "close", fill_color="color", line_color="color", source=source)
-    p_k.line("date", "ma5", source=source, line_color=MA5_COLOR, line_width=1.4, legend_label="MA5")
-    p_k.line("date", "ma20", source=source, line_color=MA20_COLOR, line_width=1.4, legend_label="MA20")
+    p_k.segment("i", "high", "i", "low", color="color", source=source, line_width=1)
+    p_k.vbar("i", width, "open", "close", fill_color="color", line_color="color", source=source)
+    p_k.line("i", "ma5", source=source, line_color=MA5_COLOR, line_width=1.4, legend_label="MA5")
+    p_k.line("i", "ma20", source=source, line_color=MA20_COLOR, line_width=1.4, legend_label="MA20")
     p_k.add_tools(
         HoverTool(
             tooltips=[
@@ -524,18 +534,28 @@ def _kline_tab(df: pd.DataFrame, title: str) -> Any:
     p_k.legend.click_policy = "hide"
     p_k.grid.grid_line_alpha = 0.25
     p_k.yaxis.axis_label = "价格"
+    _apply_kline_index_xaxis(p_k, tick_idxs, overrides)
 
     p_vol = figure(
         title="成交量",
-        x_axis_type="datetime",
         width=1200,
         height=120,
         tools=_tools(),
         x_range=p_k.x_range,
         toolbar_location=None,
     )
-    p_vol.vbar("date", width, 0, "volume", fill_color="color", line_color="color", source=source, alpha=0.85)
+    p_vol.vbar(
+        "i",
+        width,
+        0,
+        "volume",
+        fill_color="color",
+        line_color="color",
+        source=source,
+        alpha=0.85,
+    )
     p_vol.grid.grid_line_alpha = 0.25
+    _apply_kline_index_xaxis(p_vol, tick_idxs, overrides)
     return column(p_k, p_vol, sizing_mode="stretch_width")
 
 
@@ -543,20 +563,22 @@ def _page_css() -> str:
     return """
 <style>
 html, body { margin:0; padding:0; background:#f5f6f8; font-family:"Microsoft YaHei","Segoe UI",Arial,sans-serif; }
-.sd-head { background:#fff; border-bottom:1px solid #e8e8e8; padding:12px 18px 10px; }
+.sd-head { background:#fff; border-bottom:1px solid #e8e8e8; padding:12px 18px 14px; margin:0 0 10px 0; box-sizing:border-box; }
 .sd-row1 { display:flex; align-items:center; gap:10px; }
 .sd-name { font-size:22px; font-weight:700; color:#1f1f1f; }
 .sd-code { font-size:13px; color:#8c8c8c; }
 .sd-badge { font-size:11px; padding:1px 8px; border-radius:2px; background:#fff1f0; color:#cf1322; border:1px solid #ffa39e; }
 .sd-upd { margin-left:auto; font-size:12px; color:#bfbfbf; }
-.sd-row2 { margin-top:4px; }
+.sd-row2 { margin-top:4px; line-height:1.2; }
 .sd-px { font-size:32px; font-weight:700; margin-right:14px; }
 .sd-chg { font-size:16px; font-weight:600; }
 .sd-row2.up, .up { color:#ef232a; }
 .sd-row2.down, .down { color:#14b143; }
 .sd-row2.flat, .flat { color:#262626; }
-.sd-metrics { display:flex; flex-wrap:wrap; gap:6px 4px; margin-top:8px; }
+.sd-metrics { display:flex; flex-wrap:wrap; gap:6px 4px; margin-top:10px; }
 .sd-metrics i { font-style:normal; font-size:12px; color:#595959; background:#fafafa; border:1px solid #f0f0f0; padding:2px 8px; border-radius:2px; }
+/* 顶栏与下方 Tabs 之间留空，避免 K 线区盖住开高低换手 */
+.bk-root .bk-Column > .bk-Tabs { margin-top: 6px !important; }
 .bk-root .bk-tabs-header { background:#fff !important; border-bottom:1px solid #e8e8e8 !important; }
 .bk-root .bk-tab { font-size:14px !important; padding:8px 18px !important; color:#595959 !important; }
 .bk-root .bk-tab.bk-active { color:#cf1322 !important; font-weight:600 !important; border-bottom:2px solid #cf1322 !important; }
@@ -764,7 +786,7 @@ def render_stock_detail_page(
         width=1200,
         active=active,
     )
-    layout = column(header, tabs, sizing_mode="stretch_width")
+    layout = column(header, tabs, spacing=14, sizing_mode="stretch_width")
     title = f"{name} {code}".strip() or str(code)
     html = file_html(layout, INLINE, title=title)
     css = _page_css()

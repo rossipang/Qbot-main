@@ -1,0 +1,10 @@
+---
+description: 刷新缓存不提交、不同步说明里唠叨
+alwaysApply: true
+---
+
+# 行情/刷新缓存
+
+- `qbot/gui/csv/` 下刷新产生的缓存（`forward_watch_*.json`、`intraday_watch.json`、`daily_news_digest.*`、`ml_factor_store.sqlite`、各类 log 等）默认不提交，除非用户当轮明确要求提交缓存。
+- pull/同步时：可静默 stash 或绕开这些文件，**不要**向用户解释「本地有未提交缓存、stash 了什么、要不要恢复」。
+- 回复里不要主动提缓存/stash/gitignore 白名单，除非用户问或提交冲突必须处理。

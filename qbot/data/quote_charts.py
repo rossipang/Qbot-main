@@ -95,6 +95,8 @@ def _prepare_ohlcv(df: pd.DataFrame) -> pd.DataFrame:
         if col in data.columns:
             data[col] = pd.to_numeric(data[col], errors="coerce")
     data = data.sort_values("date").reset_index(drop=True)
+    # 同日重复柱只留最后一根，防止周/月K末根叠画
+    data = data.drop_duplicates(subset=["date"], keep="last").reset_index(drop=True)
 
     data["ma5"] = data["close"].rolling(5, min_periods=1).mean()
     data["ma20"] = data["close"].rolling(20, min_periods=1).mean()
@@ -154,33 +156,79 @@ def _candle_source(data: pd.DataFrame) -> ColumnDataSource:
     vol_colors = np.where(inc, VOLUME_UP, VOLUME_DOWN)
     ret = data["ret"].fillna(0.0)
     ret_colors = np.where(ret >= 0, UP_COLOR, DOWN_COLOR)
-    return ColumnDataSource(
-        data=dict(
-            date=data["date"],
-            date_str=data["date_str"],
-            open=data["open"],
-            high=data["high"],
-            low=data["low"],
-            close=data["close"],
-            ma5=data["ma5"],
-            ma20=data["ma20"],
-            volume=vol.fillna(0.0),
-            ret=ret,
-            cum_ret=data["cum_ret"],
-            color=colors,
-            vol_color=vol_colors,
-            ret_color=ret_colors,
-        )
+    payload = dict(
+        date=data["date"],
+        date_str=data["date_str"],
+        open=data["open"],
+        high=data["high"],
+        low=data["low"],
+        close=data["close"],
+        ma5=data["ma5"],
+        ma20=data["ma20"],
+        volume=vol.fillna(0.0),
+        ret=ret,
+        cum_ret=data["cum_ret"],
+        color=colors,
+        vol_color=vol_colors,
+        ret_color=ret_colors,
     )
+    # 等距横轴序号（日/周/月K 共用，避免未完结周期日历挤在一起）
+    if "i" in data.columns:
+        payload["i"] = data["i"].tolist()
+    else:
+        payload["i"] = list(range(len(data)))
+    return ColumnDataSource(data=payload)
+
+
+# 等距序号轴上的蜡烛宽度（相邻柱间距=1）
+INDEX_BAR_WIDTH = 0.7
 
 
 def _bar_width(data: pd.DataFrame) -> float:
-    """按时间间隔估算蜡烛宽度（毫秒）。"""
+    """按时间间隔估算蜡烛宽度（毫秒），仅用于 datetime 横轴图。
+
+    周/月K 未完结周期会使末段间隔远小于中位数；若用最小间隔压宽，
+    前面柱会又细又疏。这里用中位数，并丢掉明显偏小的末段间隔。
+    个股详情日/周/月K 请用等距序号轴 + INDEX_BAR_WIDTH，勿依赖本函数。
+    """
     if len(data) < 2:
         return 12 * 60 * 60 * 1000  # 半天
-    deltas = data["date"].diff().dropna().dt.total_seconds() * 1000
-    med = float(deltas.median()) if len(deltas) else 24 * 60 * 60 * 1000
-    return max(med * 0.7, 60 * 60 * 1000 * 0.2)
+    deltas = data["date"].diff().dropna().dt.total_seconds() * 1000.0
+    deltas = deltas[deltas > 0]
+    if deltas.empty:
+        return 12 * 60 * 60 * 1000
+    med = float(deltas.median())
+    if len(deltas) >= 3 and float(deltas.iloc[-1]) < med * 0.55:
+        deltas = deltas.iloc[:-1]
+        if not deltas.empty:
+            med = float(deltas.median())
+    return max(med * 0.65, 60 * 60 * 1000 * 0.15)
+
+
+def _kline_index_ticks(date_strs, *, max_ticks: int = 8):
+    """等距 K 线横轴刻度：返回 (tick_idxs, label_overrides)。"""
+    n = len(date_strs)
+    if n <= 0:
+        return [], {}
+    if n <= max_ticks:
+        idxs = list(range(n))
+    else:
+        step = max(1, (n - 1) // (max_ticks - 1))
+        idxs = list(range(0, n, step))
+        if idxs[-1] != n - 1:
+            idxs.append(n - 1)
+    overrides = {i: str(date_strs[i]) for i in idxs}
+    return idxs, overrides
+
+
+def _apply_kline_index_xaxis(fig, tick_idxs, overrides) -> None:
+    from bokeh.models import FixedTicker
+
+    if tick_idxs:
+        fig.xaxis.ticker = FixedTicker(ticks=list(tick_idxs))
+        fig.xaxis.major_label_overrides = dict(overrides)
+    fig.xaxis.major_label_orientation = 0.85
+    fig.xaxis.axis_label = None
 
 
 FLOW_Y_CAP_YI = 100.0  # 单日资金流向纵轴上限（亿元）
