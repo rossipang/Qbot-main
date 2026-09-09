@@ -10,9 +10,28 @@ import wx
 
 from qbot.common.logging.logger import LOGGER as logger
 from qbot.data.intraday import is_cn_trading_session
-from qbot.data.stock_detail_page import render_stock_detail_page
+from qbot.data.stock_detail_page import (
+    load_quote_detail_tab,
+    render_stock_detail_page,
+    save_quote_detail_tab,
+)
 from qbot.gui.config import DATA_DIR_BKT_RESULT
 from qbot.gui.widgets.widget_web import WebPanel
+
+
+_TAB_QUERY_JS = """
+(function(){
+  var hdr = document.querySelector('.bk-tabs-header');
+  var root = hdr || document;
+  var ts = root.querySelectorAll('.bk-tab, [role="tab"]');
+  for (var i = 0; i < ts.length; i++) {
+    var el = ts[i];
+    if (el.classList.contains('bk-active') || el.getAttribute('aria-selected') === 'true')
+      return String(i);
+  }
+  return '';
+})();
+"""
 
 
 class QuoteDetailDialog(wx.Dialog):
@@ -33,11 +52,12 @@ class QuoteDetailDialog(wx.Dialog):
         self._busy = False
         self._closed = False
         self._cache: dict = {}
+        self._active_tab = load_quote_detail_tab(code, 0)
 
         root = wx.BoxSizer(wx.VERTICAL)
         bar = wx.BoxSizer(wx.HORIZONTAL)
         self.lbl_status = wx.StaticText(self, label="正在加载…")
-        self.chk_auto = wx.CheckBox(self, label="盘中自动刷新分时(15秒)")
+        self.chk_auto = wx.CheckBox(self, label="盘中自动刷新(保持当前标签)")
         self.chk_auto.SetValue(True)
         self.btn_refresh = wx.Button(self, label="刷新")
         self.btn_close = wx.Button(self, wx.ID_CLOSE, label="关闭")
@@ -64,6 +84,10 @@ class QuoteDetailDialog(wx.Dialog):
     def _on_close(self, event):
         self._closed = True
         try:
+            self._capture_active_tab()
+        except Exception:
+            pass
+        try:
             self._timer.Stop()
         except Exception:
             pass
@@ -79,10 +103,53 @@ class QuoteDetailDialog(wx.Dialog):
         if not self._closed:
             self.lbl_status.SetLabel(text)
 
+    def _parse_tab_result(self, result):
+        if result is None:
+            return None
+        if isinstance(result, (list, tuple)):
+            # 部分 wx 绑定返回 (ok, value)
+            if len(result) >= 2 and isinstance(result[0], bool):
+                if not result[0]:
+                    return None
+                result = result[1]
+            elif len(result) == 1:
+                result = result[0]
+        text = str(result).strip().strip('"').strip("'")
+        if not text or text.lower() in ("none", "null", "undefined"):
+            return None
+        try:
+            idx = int(float(text))
+        except (TypeError, ValueError):
+            return None
+        if 0 <= idx <= 6:
+            return idx
+        return None
+
+    def _capture_active_tab(self) -> int:
+        """刷新前从当前页面读出激活标签，写入内存与 sidecar，避免跳回分时。"""
+        idx = None
+        try:
+            browser = self.web.browser
+            result = browser.RunScript(_TAB_QUERY_JS)
+            idx = self._parse_tab_result(result)
+        except Exception:
+            idx = None
+        if idx is None:
+            idx = int(self._active_tab or 0)
+        self._active_tab = max(0, min(int(idx), 6))
+        save_quote_detail_tab(self.code, self._active_tab)
+        return self._active_tab
+
     def _load(self, full: bool = True, silent: bool = False):
         if self._busy or self._closed:
             return
         self._busy = True
+        # 先记住当前标签，再整页重载（file:// 破缓存副本会丢掉 localStorage）
+        try:
+            self._capture_active_tab()
+        except Exception:
+            pass
+        active_tab = int(self._active_tab or 0)
         if not silent:
             self._set_status(
                 f"正在加载{'全部' if full else '分时'}：{self.name}({self.code})…"
@@ -99,6 +166,7 @@ class QuoteDetailDialog(wx.Dialog):
                     name=self.name,
                     cache=self._cache,
                     refresh_heavy=full or not self._cache.get("ready"),
+                    active_tab=active_tab,
                 )
             except Exception as exc:  # noqa: BLE001
                 err = str(exc)
@@ -119,7 +187,7 @@ class QuoteDetailDialog(wx.Dialog):
                         logger.error(f"个股详情展示失败: {exc}")
                         return
                     tag = (
-                        "盘中自动刷新中"
+                        "盘中自动刷新中(保持标签)"
                         if is_cn_trading_session()
                         else "点击标签切换 分时/日K/周K/月K"
                     )

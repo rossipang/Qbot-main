@@ -587,23 +587,38 @@ html, body { margin:0; padding:0; background:#f5f6f8; font-family:"Microsoft YaH
 
 
 def _page_tab_keep_js(code: str) -> str:
-    """盘中刷新会换 file:// 文件名，用 localStorage 按代码记住标签，避免跳回分时。"""
+    """盘中刷新会换 file:// 文件名；按代码记标签，并尽量在 Bokeh 就绪后点回。"""
     safe = "".join(ch for ch in str(code or "") if ch.isalnum()) or "x"
     return f"""
 <script>
 (function(){{
   var KEY = "qbot_quote_tab_{safe}";
   function tabNodes(){{
+    var hdr = document.querySelector(".bk-tabs-header");
+    var root = hdr || document;
     return Array.prototype.slice.call(
-      document.querySelectorAll(".bk-tab, .bk-tabs-header [role='tab']")
+      root.querySelectorAll(".bk-tab, [role='tab']")
     );
+  }}
+  function activeIndex(){{
+    var ts = tabNodes();
+    for (var i = 0; i < ts.length; i++) {{
+      var el = ts[i];
+      if (el.classList.contains("bk-active") || el.getAttribute("aria-selected") === "true")
+        return i;
+    }}
+    return 0;
   }}
   function restore(){{
     try {{
-      var i = parseInt(localStorage.getItem(KEY) || "0", 10);
-      if (!i || i < 0) return;
+      var raw = localStorage.getItem(KEY);
+      if (raw === null || raw === "") return;
+      var i = parseInt(raw, 10);
+      if (isNaN(i) || i < 0) return;
       var ts = tabNodes();
-      if (ts[i]) ts[i].click();
+      if (!ts.length || i >= ts.length) return;
+      if (activeIndex() === i) return;
+      ts[i].click();
     }} catch (e) {{}}
   }}
   document.addEventListener("click", function(e){{
@@ -616,15 +631,50 @@ def _page_tab_keep_js(code: str) -> str:
     }}
   }}, true);
   function boot(){{
-    setTimeout(restore, 80);
-    setTimeout(restore, 320);
-    setTimeout(restore, 900);
+    setTimeout(restore, 50);
+    setTimeout(restore, 200);
+    setTimeout(restore, 600);
+    setTimeout(restore, 1500);
   }}
   if (document.readyState === "complete") boot();
   else window.addEventListener("load", boot);
 }})();
 </script>
 """
+
+
+def quote_detail_tab_path(code: str) -> Path:
+    safe = "".join(ch for ch in str(code or "") if ch.isalnum()) or "x"
+    return (
+        Path(__file__).resolve().parents[1]
+        / "gui"
+        / "bkt_result"
+        / f"quote_detail_{safe}.tab"
+    )
+
+
+def load_quote_detail_tab(code: str, default: int = 0) -> int:
+    """读取上次停留的标签索引（0=分时 …）。"""
+    try:
+        p = quote_detail_tab_path(code)
+        if not p.exists():
+            return int(default)
+        v = int(str(p.read_text(encoding="utf-8")).strip().split()[0])
+        if 0 <= v <= 6:
+            return v
+    except Exception:
+        pass
+    return int(default)
+
+
+def save_quote_detail_tab(code: str, idx: int) -> None:
+    try:
+        v = max(0, min(int(idx), 6))
+        p = quote_detail_tab_path(code)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(str(v), encoding="utf-8")
+    except Exception:
+        pass
 
 
 def _prefer_longer_frame(old, new):
@@ -647,12 +697,12 @@ def render_stock_detail_page(
     name: str = "",
     cache: Optional[Dict[str, Any]] = None,
     refresh_heavy: bool = True,
-    active_tab: int = 0,
+    active_tab: Optional[int] = None,
 ) -> Path:
     """
     生成专业个股详情 HTML（标签页切换）。
     cache: 可复用日/周/月K、资金、财务，盘中刷新时 refresh_heavy=False 只更新分时。
-    active_tab: 初始标签索引（仍会由页面 JS 用 localStorage 覆盖恢复）。
+    active_tab: 初始标签索引；None 时读上次保存的标签，避免刷新跳回分时。
     """
     from qbot.data.eastmoney_quote import fetch_kline
     from qbot.data.fund_flow import DEFAULT_LOOKBACK_DAYS, MIN_USEFUL_KLINES, fetch_fund_flow_bundle
@@ -660,6 +710,13 @@ def render_stock_detail_page(
     from qbot.data.stock_finance import fetch_finance_bundle
 
     cache = cache if cache is not None else {}
+    if active_tab is None:
+        active_tab = load_quote_detail_tab(code, 0)
+    try:
+        active_tab = max(0, min(int(active_tab), 6))
+    except (TypeError, ValueError):
+        active_tab = 0
+    save_quote_detail_tab(code, active_tab)
     bundle = fetch_intraday_bundle(code)
     quote = bundle.get("quote") or {}
     trends = bundle.get("trends")

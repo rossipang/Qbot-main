@@ -19,11 +19,8 @@ from qbot.gui.mainframe import MainFrame
 
 
 _SINGLE_INSTANCE_NAME = "Qbot.AIQuant.MainFrame.v1"
-
-
-def _another_instance_running() -> bool:
-    checker = wx.SingleInstanceChecker(_SINGLE_INSTANCE_NAME)
-    return checker.IsAnotherRunning()
+# 必须进程级常驻：Windows 上 SingleInstanceChecker 被 GC 会立刻释放互斥，导致「单例失效、多开」
+_INSTANCE_CHECKER = None
 
 
 def _quiet_wx_logs() -> None:
@@ -39,7 +36,11 @@ def _quiet_wx_logs() -> None:
 if __name__ == "__main__":
     app = wx.App(redirect=False)
     _quiet_wx_logs()
-    if _another_instance_running():
+
+    _INSTANCE_CHECKER = wx.SingleInstanceChecker(_SINGLE_INSTANCE_NAME)
+    # 再挂到 app，防止局部引用被回收
+    app._qbot_instance_checker = _INSTANCE_CHECKER  # type: ignore[attr-defined]
+    if _INSTANCE_CHECKER.IsAnotherRunning():
         wx.MessageBox(
             "Qbot 已在运行，请勿重复启动。\n若看不到窗口，请先在任务栏切换或结束旧进程后再开。",
             "提示",

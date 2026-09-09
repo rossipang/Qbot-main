@@ -1,5 +1,10 @@
 # -*- coding: utf-8 -*-
-"""每日新闻大事：近 1～3 日重点快讯 → 分栏 + 相关板块利好/利空。
+"""每日新闻大事：近 1～3 日硬叙事催化 → 分栏 + 相关板块利好/利空。
+
+初衷：提前看见可交易叙事，而不是A股事后行情战报。
+保留示例：英伟达财报/大会、科技重大发明与量产、厄尔尼诺/粮价、战争→军工航天、金价突破；
+以及美股/亚太盘前隔夜（费城半导体、纳指涨跌）——作A股开盘参考。
+丢掉示例：凯莱英冲高近X%、摩尔跌多少、境内ETF标的指数涨跌软广、A股板块午后纷纷拉升。
 
 启动默认刷近 3 天（优先当天），写入 json + html，供 GUI 网页版面展示。
 """
@@ -79,17 +84,24 @@ _CATEGORY_RULES: List[Tuple[str, Tuple[str, ...]]] = (
     ),
     (
         "军工航天",
-        ("军工", "国防", "航天", "卫星", "低空", "导弹", "雷达", "商业航天", "星网"),
+        (
+            "军工", "国防", "航天", "卫星", "低空", "导弹", "雷达", "商业航天", "星网",
+            "战争", "冲突", "袭击", "霍尔木兹", "制裁", "开战",
+        ),
     ),
     (
         "消费农业",
-        ("白酒", "消费", "零售", "农业", "种业", "生猪", "饲料", "乳业", "旅游"),
+        (
+            "白酒", "消费", "零售", "农业", "种业", "生猪", "饲料", "乳业", "旅游",
+            "厄尔尼诺", "拉尼娜", "粮价", "粮食", "大豆", "玉米", "小麦", "棉花",
+        ),
     ),
     (
         "宏观美股",
         (
-            "美联储", "美股", "标普", "纳斯达克", "道指", "非农", "CPI", "降息",
+            "美联储", "美股", "标普", "纳斯达克", "纳指", "道指", "非农", "CPI", "降息",
             "加息", "美元", "美债", "特斯拉", "SpaceX", "财报", "指引",
+            "费城半导体", "隔夜", "盘前", "日经", "韩股", "台股", "亚太",
         ),
     ),
 )
@@ -109,10 +121,13 @@ _BOARD_MAP: List[Tuple[str, Tuple[str, ...]]] = (
     ("创新药/CXO", ("创新药", "CXO", "医保", "凯莱英", "药明", "ADC", "GLP")),
     ("光伏", ("光伏", "硅料", "组件", "逆变器")),
     ("核电/电网", ("核电", "电网", "特高压", "变压器")),
-    ("军工/国防", ("军工", "国防", "导弹", "雷达")),
+    ("军工/国防", ("军工", "国防", "导弹", "雷达", "战争", "袭击", "制裁", "开战")),
     ("商业航天", ("航天", "卫星", "星网", "低空")),
-    ("农业/种植", ("农业", "种业", "粮食", "生猪")),
-    ("美股科技/算力链", ("戴尔", "Dell", "英伟达", "NVIDIA", "Rubin", "美股", "纳斯达克")),
+    ("农业/种植", ("农业", "种业", "粮食", "生猪", "厄尔尼诺", "拉尼娜", "粮价", "大豆", "玉米", "小麦")),
+    ("美股科技/算力链", (
+        "戴尔", "Dell", "英伟达", "NVIDIA", "Rubin", "美股", "纳斯达克", "纳指",
+        "费城半导体", "美国半导体", "美股芯片", "美股科技",
+    )),
 )
 
 # 板块 → 前瞻主题 id（取种子作强相关个股）
@@ -255,6 +270,81 @@ _NOISE = (
     "酒类广告",
 )
 
+# 硬叙事：应提前看见的催化（打分加权；与事后涨跌战报对立）
+_HARD_NARRATIVE = (
+    "英伟达",
+    "NVIDIA",
+    "财报",
+    "业绩指引",
+    "指引上调",
+    "指引下调",
+    "不及预期",
+    "超预期",
+    "Vera Rubin",
+    "Rubin",
+    "量产",
+    "发明",
+    "专利",
+    "突破",
+    "新品发布",
+    "芯片管制",
+    "厄尔尼诺",
+    "拉尼娜",
+    "粮价",
+    "粮食危机",
+    "战争",
+    "开战",
+    "冲突升级",
+    "导弹袭击",
+    "袭击",
+    "霍尔木兹",
+    "制裁",
+    "金价",
+    "现货黄金",
+    "美元/盎司",
+    "COMEX",
+    "涨价",
+    "提价",
+    "缺货",
+    "国常会",
+    "核准",
+    "发改委",
+    "扩产",
+    "获批上市",
+    "新药获批",
+)
+
+# 低信息量公司日历/资本运作：不是硬叙事（由 _is_digest_fluff 组合判断）
+_DIGEST_FLUFF_MEETING = (
+    "业绩说明会",
+    "集体业绩说明会",
+    "参加科创板",
+)
+_DIGEST_FLUFF_OPS = (
+    "销售生猪",
+    "生猪销量",
+    "生猪销售",
+)
+_DIGEST_FLUFF_BOARD_CHASE = (
+    "两连板",
+    "三连板",
+    "严重异常波动",
+    "停牌核查",
+)
+
+_HARD_NARRATIVE_RE = re.compile(
+    r"("
+    r"现货黄金.{0,12}突破"
+    r"|金价.{0,8}(突破|大涨|创)"
+    r"|英伟达.{0,20}(财报|大会|量产|指引|Rubin)"
+    r"|NVIDIA.{0,20}(earnings|guidance|Rubin)"
+    r"|厄尔尼诺|拉尼娜"
+    r"|(导弹|空袭|袭击).{0,16}(油轮|基地|港口|霍尔木兹)"
+    r"|(染料|稀土|锂|铜|铝|钢材|硅料|玉米|大豆|小麦).{0,40}(涨价|提价|上调|上涨)"
+    r"|价格加速上涨"
+    r")"
+)
+
 # 子串伪阳性：出现否定式时，不计对应利好词
 _BULL_NEGATIONS = (
     ("订单", ("无订单", "尚未形成订单", "暂未形成订单", "没有订单", "未获订单")),
@@ -360,6 +450,61 @@ def _stance(title: str) -> Tuple[str, str]:
     return "中性", "信息增量或方向不明，不作单边定性"
 
 
+def _is_hard_narrative(title: str) -> bool:
+    """英伟达财报、发明量产、厄尔尼诺/粮价、战争军工、金价等硬叙事。"""
+    t = str(title or "")
+    if not t:
+        return False
+    try:
+        from qbot.data.industry_screener import news_title_is_overseas_premarket_ref
+
+        if news_title_is_overseas_premarket_ref(t):
+            return True
+    except Exception:
+        pass
+    if _HARD_NARRATIVE_RE.search(t):
+        return True
+    hits = sum(1 for k in _HARD_NARRATIVE if k in t)
+    return hits >= 2 or (
+        hits >= 1
+        and any(
+            k in t
+            for k in (
+                "英伟达",
+                "NVIDIA",
+                "财报",
+                "金价",
+                "现货黄金",
+                "厄尔尼诺",
+                "霍尔木兹",
+                "国常会",
+                "量产",
+                "涨价",
+            )
+        )
+    )
+
+
+def _is_digest_fluff(title: str) -> bool:
+    """业绩说明会、解除质押、连板异动回应等：低信息量，不当大事。"""
+    t = str(title or "")
+    if not t:
+        return True
+    if _is_hard_narrative(t):
+        return False
+    if any(k in t for k in _DIGEST_FLUFF_MEETING):
+        return True
+    if any(k in t for k in _DIGEST_FLUFF_OPS):
+        return True
+    if "质押" in t and any(k in t for k in ("解除", "股票质押", "股权质押")):
+        return True
+    if any(k in t for k in _DIGEST_FLUFF_BOARD_CHASE):
+        if any(k in t for k in ("澄清", "风险提示", "提示风险", "立案")):
+            return False
+        return True
+    return False
+
+
 def _importance(title: str, source: str, boards: List[str], stance: str) -> float:
     t = str(title or "")
     score = 0.0
@@ -371,15 +516,17 @@ def _importance(title: str, source: str, boards: List[str], stance: str) -> floa
         score += 0.5
     if source in ("财联社", "华尔街见闻", "央视新闻"):
         score += 1.0
-    if any(k in t for k in ("英伟达", "戴尔", "Dell", "订单", "财报", "获批", "国常会")):
+    if _is_hard_narrative(t):
+        score += 3.5
+    elif any(k in t for k in ("英伟达", "戴尔", "Dell", "财报", "获批", "国常会", "涨价", "量产")):
         score += 1.5
+    if _is_digest_fluff(t):
+        score -= 4.0
     if any(k in t for k in _NOISE) and not boards:
         score -= 3.0
     if len(t) < 18:
         score -= 0.5
     return score
-
-
 
 
 def _seeds_for_board(board: str, limit: int = 3) -> List[Dict[str, str]]:
@@ -952,10 +1099,15 @@ def build_daily_news_digest(
         title = str(r.get("title") or "").strip()
         if not title or news_title_is_market_noise(title):
             continue
+        if _is_digest_fluff(title):
+            continue
         boards = _related_boards(title)
         stance, why = _stance(title)
         score = _importance(title, str(r.get("source") or ""), boards, stance)
+        # 无板块映射且非硬叙事：门槛抬高，避免杂讯占坑
         if score < min_score and not boards:
+            continue
+        if not boards and not _is_hard_narrative(title) and score < (min_score + 1.5):
             continue
         cat = _categorize(title)
         # 宏观美股若已映射到算力链，仍可留在宏观栏（戴尔属于宏观美股触发）
@@ -1005,8 +1157,10 @@ def build_daily_news_digest(
             if by_cat.get(c)
         ],
         "note": (
-            f"默认近{days}天重点新闻（优先当天）；上方为板块多空总结+相关新闻+强相关个股；"
-            "多空为标题客观定性；强相关与上方新闻对应，不构成荐股承诺。"
+            f"默认近{days}天硬叙事新闻（优先当天）：财报/发明量产/粮价气候/战争军工/金价商品涨价，"
+            "以及美股亚太盘前隔夜（费城半导体等，作A股开盘参考）；"
+            "过滤A股事后个股冲高跌幅战报与境内ETF软广。"
+            "上方为板块多空总结+相关新闻+强相关个股；多空为标题客观定性；不构成荐股承诺。"
         ),
     }
     html_doc = render_daily_news_html(payload)

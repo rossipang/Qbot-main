@@ -373,6 +373,121 @@ _MARKET_NOISE_TITLE_PATTERNS = (
     "净流出超",
     "净买入超",
     "净卖出超",
+    # 事后个股涨跌战报（非催化）
+    "冲高近",
+    "冲高超",
+    "午后拉升",
+    "午后震荡上扬",
+    "纷纷拉升",
+    "局部异动",
+)
+
+# 事后涨跌幅战报：仅强实质词可放行（「订单/合作」不够）
+# 注意：不含「美股盘前/亚太隔夜」——那类由 news_title_is_overseas_premarket_ref 单独放行
+_POSTHOC_STOCK_PCT_RE = re.compile(
+    r"("
+    r"冲高(近|超)?\s*\d+(\.\d+)?\s*%"
+    r"|涨超\s*\d+(\.\d+)?\s*%"
+    r"|跌超\s*\d+(\.\d+)?\s*%"
+    r"|涨近\s*\d+(\.\d+)?\s*%"
+    r"|跌近\s*\d+(\.\d+)?\s*%"
+    r"|(盘中|午后|早盘|尾盘).{0,6}(上涨|下跌|大涨|大跌)\s*\d+(\.\d+)?\s*%"
+    r"|(股价|个股).{0,24}(上涨|下跌)\s*\d+(\.\d+)?\s*%"
+    r"|午后(拉升|震荡上扬|涨停|走强|翻红)"
+    r"|纷纷(拉升|涨停|走强)"
+    r"|局部异动"
+    r"|板块.{0,10}(异动|活跃|拉升)"
+    r")"
+)
+
+# 美股/亚太盘前·隔夜：A股开盘参考（费城半导体等），不当噪声丢掉
+_OVERSEAS_PREMARKET_KEYS = (
+    "美股盘前",
+    "美股盘后",
+    "隔夜美股",
+    "美股收盘",
+    "纳斯达克",
+    "纳指",
+    "道指",
+    "道琼斯",
+    "标普",
+    "标普500",
+    "费城半导体",
+    "费城半导",
+    "SOX",
+    "美国半导体",
+    "美股科技",
+    "美股芯片",
+    "亚太股市",
+    "亚太股",
+    "日经",
+    "日经225",
+    "韩国综合",
+    "韩股",
+    "Kospi",
+    "KOSPI",
+    "台股",
+    "台湾加权",
+    "恒生指数",
+    "恒指",
+    "富时中国",
+    "富时A50",
+    "夜盘",
+)
+_OVERSEAS_PREMARKET_RE = re.compile(
+    r"("
+    r"美股.{0,12}(盘前|盘后|隔夜|收盘)"
+    r"|(盘前|隔夜).{0,12}(美股|纳指|纳斯达克|道指|标普|费城)"
+    r"|(费城半导体|美国半导体|美股芯片|纳指|纳斯达克|道指|标普500).{0,16}"
+    r"(涨|跌|升|回落|走高|走低|收涨|收跌)"
+    r"|(日经|韩股|台股|恒指|恒生|KOSPI|Kospi).{0,16}(涨|跌|升|收涨|收跌)"
+    r")"
+)
+
+
+def news_title_is_overseas_premarket_ref(title: str) -> bool:
+    """美股/亚太盘前或隔夜指数·半导体涨跌：可作A股开盘参考。"""
+    t = str(title or "").strip()
+    if not t:
+        return False
+    # A股盘中战报 / 境内ETF软广不算外围参考
+    if any(
+        k in t
+        for k in (
+            "沪深",
+            "两市",
+            "创业板指",
+            "科创50",
+            "上证",
+            "涨停",
+            "跌停",
+            "连板",
+            "标的指数",
+            "跟踪指数",
+        )
+    ):
+        if not any(k in t for k in ("美股", "纳指", "纳斯达克", "费城", "日经", "韩股", "台股")):
+            return False
+    if any(k in t for k in _OVERSEAS_PREMARKET_KEYS):
+        return True
+    if _OVERSEAS_PREMARKET_RE.search(t):
+        return True
+    # 个股+美股盘前/隔夜涨跌（如「XX美股盘前上涨5%」）
+    if ("美股" in t or "美股盘前" in t) and any(
+        k in t for k in ("盘前", "盘后", "隔夜", "收涨", "收跌", "上涨", "下跌")
+    ):
+        return True
+    return False
+
+
+# ETF 软广：标的指数涨跌复盘，不是产业叙事
+_ETF_SOFT_AD_RE = re.compile(
+    r"("
+    r"ETF.{0,48}(标的指数|跟踪指数|涨超|涨近|跌超|跌近|拉升)"
+    r"|(标的指数|跟踪指数).{0,24}(涨超|涨近|跌超|跌近)"
+    r"|港股\w{0,8}ETF"
+    r"|疫苗ETF|医疗ETF|生物科技ETF|黄金ETF|半导体ETF"
+    r")"
 )
 
 # 软实质词：可盖过「跟涨/走高」等泛盘面词；盖不住「概念拉升/回应跌停」主句
@@ -432,7 +547,8 @@ _MARKET_NOISE_SUBSTANCE_KEEP = (
     "方案",
 )
 
-# 强实质词：才允许放行「回应跌停 / 概念震荡拉升」类主句
+# 强实质词：才允许放行「回应跌停 / 概念震荡拉升 / 冲高X%」类主句
+# 注意：不含「订单」——「订单回暖+冲高9%」仍是事后战报
 _MARKET_NOISE_STRONG_KEEP = (
     "澄清",
     "提示风险",
@@ -441,12 +557,14 @@ _MARKET_NOISE_STRONG_KEEP = (
     "印发",
     "终止收购",
     "并购",
-    "订单",
     "中标",
     "业绩预告",
     "首次覆盖",
     "拟出资",
     "参设",
+    "量产",
+    "财报",
+    "国常会",
 )
 
 _PRICE_ACTION_BOARD_RE = re.compile(
@@ -469,10 +587,18 @@ _PRICE_ACTION_LIMIT_RE = re.compile(
 
 
 def news_title_is_market_noise(title: str) -> bool:
-    """盘面走势播报/当日涨跌快讯：不是公司·产业·政策实讯。"""
+    """盘面走势播报/当日涨跌快讯：不是公司·产业·政策实讯。
+
+    例外：美股/亚太盘前·隔夜（含费城半导体等）保留，作A股开盘参考。
+    """
     t = str(title or "").strip()
     if not t:
         return True
+    # 外围盘前参考优先放行（仍挡纯境内ETF软广）
+    if news_title_is_overseas_premarket_ref(t):
+        if _ETF_SOFT_AD_RE.search(t) and "美股" not in t and "纳" not in t and "费城" not in t:
+            return True
+        return False
     strong = any(k in t for k in _MARKET_NOISE_STRONG_KEEP)
     soft = any(k in t for k in _MARKET_NOISE_SUBSTANCE_KEEP)
     # 概念/板块涨跌主句、涨跌停播报：仅强实质词可放行
@@ -480,9 +606,15 @@ def news_title_is_market_noise(title: str) -> bool:
         return True
     if _PRICE_ACTION_LIMIT_RE.search(t) and not strong:
         return True
+    # 事后「冲高X%/涨超X%/午后拉升」与 ETF 软广：软实质词不够，必须强实质
+    if _POSTHOC_STOCK_PCT_RE.search(t) and not strong:
+        return True
+    if _ETF_SOFT_AD_RE.search(t) and not strong:
+        return True
     if any(k in t for k in _MARKET_NOISE_TITLE_PATTERNS):
         return not soft
-    index_keys = (
+    # 仅 A 股指数涨跌播报当噪声；美股/亚太已在上方放行
+    ashare_index_keys = (
         "深成指",
         "创业板指",
         "科创50",
@@ -490,14 +622,8 @@ def news_title_is_market_noise(title: str) -> bool:
         "沪指",
         "深指",
         "北证50",
-        "费城",
-        "纳斯达克",
-        "道指",
-        "韩国综合指数",
-        "日经",
-        "恒生指数",
     )
-    index_hit = sum(1 for k in index_keys if k in t)
+    index_hit = sum(1 for k in ashare_index_keys if k in t)
     move_keys = (
         "跌超",
         "涨超",
