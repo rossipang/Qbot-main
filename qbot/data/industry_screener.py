@@ -300,6 +300,11 @@ _INDUSTRY_CATALYST_PATTERNS = (
     "创新药",
     "医保目录",
     "CXO",
+    "电子布",
+    "电子纱",
+    "玻纤",
+    "氢氟酸",
+    "六氟磷酸锂",
 )
 
 # 盘面走势/整点回顾类：无公司产业政策信息，一律丢掉
@@ -657,8 +662,13 @@ def news_title_is_industry_catalyst(title: str) -> bool:
     if "量产" in t or "量產" in t:
         if any(k in t for k in ("CPO", "光模块", "HBM", "先进封装", "共封装")):
             return True
+    # 电子布/玻纤/氟材料涨价：产业硬催化，不依赖「量产」字样
+    if any(k in t for k in ("电子布", "电子纱", "玻纤", "氢氟酸", "六氟磷酸锂")) and any(
+        k in t for k in ("涨价", "提价", "上调", "缺货", "紧平衡", "扩产")
+    ):
+        return True
     return any(k in t for k in _INDUSTRY_CATALYST_PATTERNS) and any(
-        k in t for k in ("量产", "量產", "突破", "大涨", "涨价", "缺货", "交付", "官宣", "确认")
+        k in t for k in ("量产", "量產", "突破", "大涨", "涨价", "缺货", "交付", "官宣", "确认", "上调")
     )
 
 
@@ -766,7 +776,9 @@ def fetch_forward_news(
     def _append_eastmoney_keyword_search(
         bucket: List[dict], keyword: str, page_size: int, channel: str
     ) -> None:
-        """东财搜索：专抓创新药/医药类标题（栏目接口没有稳定医药频道）。"""
+        """东财搜索：专抓创新药/材料涨价等栏目首页漏掉的产业稿。"""
+        from urllib.parse import quote, urlencode
+
         sess = _session()
         inner = {
             "uid": "",
@@ -787,16 +799,21 @@ def fetch_forward_news(
             },
         }
         cb = f"jQuery_{int(time.time() * 1000)}"
-        r = sess.get(
-            "https://search-api-web.eastmoney.com/search/jsonp",
-            params={
+        # 中文 keyword 不能走 requests 默认 latin-1 头/参编码，改为手动 utf-8 拼 URL
+        qs = urlencode(
+            {
                 "cb": cb,
                 "param": json.dumps(inner, ensure_ascii=False),
                 "_": str(int(time.time() * 1000)),
             },
+            encoding="utf-8",
+            quote_via=quote,
+        )
+        r = sess.get(
+            f"https://search-api-web.eastmoney.com/search/jsonp?{qs}",
             headers={
                 "User-Agent": _UA,
-                "Referer": f"https://so.eastmoney.com/news/s?keyword={keyword}",
+                "Referer": f"https://so.eastmoney.com/news/s?keyword={quote(keyword)}",
             },
             timeout=15,
         )
@@ -831,6 +848,8 @@ def fetch_forward_news(
         "白酒", "消费", "地产", "有色", "煤炭", "石油", "涨停", "跌停",
         # 医药也会出现在财经要闻里
         "医药", "创新药", "医保", "药企", "生物药", "CXO", "中药", "疫苗",
+        # 材料涨价：电子布/玻纤/氟化工常走产业稿，须放行
+        "电子布", "电子纱", "玻纤", "涨价", "提价", "氢氟酸", "六氟", "覆铜板",
     )
     _TECH_KEEP = (
         "芯片", "半导体", "光模块", "CPO", "光通信", "硅光", "英伟达", "NVIDIA",
@@ -838,6 +857,7 @@ def fetch_forward_news(
         "机器人", "具身", "MLCC", "被动元件", "光伏", "新能源", "核电",
         "通信", "5G", "6G", "PCB", "消费电子", "苹果", "华为", "汽车电子",
         "软件", "信创", "数据中心", "交换机", "光芯片", "共封装",
+        "电子布", "电子纱", "玻纤", "玻璃纤维", "覆铜板",
     )
     _PHARMA_KEEP = (
         "医药", "创新药", "医保", "药企", "制药", "生物药", "生物医药",
@@ -976,15 +996,30 @@ def fetch_forward_news(
     except Exception:
         pass
 
+    # —— 材料涨价通道（电子布/玻纤/氟化工产业稿常不在科技栏目首页）——
+    material_rows: List[dict] = []
+    material_kws = (
+        ("电子布", "玻纤", "电子纱")
+        if fast
+        else ("电子布", "玻纤", "电子纱", "氢氟酸", "六氟磷酸锂", "覆铜板涨价")
+    )
+    for kw in material_kws:
+        try:
+            _append_eastmoney_keyword_search(material_rows, kw, 10, "财经")
+        except Exception:
+            pass
+
     flash_limit = 25 if fast else 35
+    material_limit = 12 if fast else 18
     fin_df = _finalize(finance_rows, _keep_finance, finance_limit)
     tech_df = _finalize(tech_rows, _keep_tech, tech_limit)
     pharma_df = _finalize(pharma_rows, _keep_pharma, pharma_limit)
+    material_df = _finalize(material_rows, _keep_finance, material_limit)
     # 快讯：只做近一周过滤，不套科技关键词白名单
     flash_df = _finalize(flash_rows, None, flash_limit)
     frames = [
         d
-        for d in (flash_df, fin_df, tech_df, pharma_df)
+        for d in (flash_df, fin_df, tech_df, pharma_df, material_df)
         if d is not None and not d.empty
     ]
     if not frames:
