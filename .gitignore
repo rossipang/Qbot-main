@@ -153,6 +153,7 @@ qbot/gui/csv/*
 !qbot/gui/csv/forward_short_gbdt.joblib
 !qbot/gui/csv/forward_short_gbdt_meta.json
 !qbot/gui/csv/forward_ml_index_510300.json
+!qbot/gui/csv/auto_sell.example.json
 
 pytrader/user_config.sh
 *.parquet

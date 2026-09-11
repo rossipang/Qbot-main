@@ -1,0 +1,39 @@
+{
+  "_comment": "复制为 auto_sell_local.json 后填写。默认 dry_run=true 只打印不委托。密码勿提交 git。",
+  "dry_run": true,
+  "broker": "universal_client",
+  "broker_note": "universal_client=通用同花顺下单; ht_client=华泰; htzq_client=海通; gj_client=国金",
+  "account": {
+    "user": "",
+    "password": "",
+    "comm_password": "",
+    "exe_path": "C:\\\\同花顺软件\\\\同花顺\\\\xiadan.exe"
+  },
+  "schedule": {
+    "weekdays": [3, 4],
+    "weekday_note": "0=周一 … 3=周四 4=周五；默认周四+周五早盘卖出纪律",
+    "evaluate_after": "09:45",
+    "evaluate_until": "10:30",
+    "poll_seconds": 20
+  },
+  "rules": {
+    "weak_pct_lt": 0.5,
+    "weak_pct_note": "相对昨收涨幅低于该值(%)视为涨不动",
+    "open_fade_open_pct_ge": 1.0,
+    "open_fade_below_open_pct": 0.3,
+    "open_fade_note": "高开≥1% 且现价相对开盘回落≥0.3% → 高开低走",
+    "from_high_fade_pct": 1.5,
+    "from_high_fade_note": "相对当日最高回撤≥1.5% 也触发",
+    "sell_ratio_weak": 0.5,
+    "sell_ratio_fade": 1.0,
+    "thursday_force_full": true,
+    "thursday_note": "周四触发则默认清仓可卖部分；周五弱则半仓、冲高回落可全清",
+    "limit_price_discount": 0.005,
+    "limit_price_note": "限价=现价*(1-discount)，提高成交概率；也可用 market_sell=true",
+    "market_sell": false
+  },
+  "codes_whitelist": [],
+  "codes_whitelist_note": "空=账户全部可卖持仓；非空则只处理名单内代码",
+  "codes_blacklist": [],
+  "min_sell_shares": 100
+}
