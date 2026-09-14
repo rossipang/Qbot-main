@@ -29,6 +29,8 @@ INDEX_CACHE_PATH = (
 )
 
 # 日K可复现特征（训练/推理共用）；名称供 GUI 解释
+# 稳住在「曾到 RankIC≈0.08」的 34 键上，只加少量买点相关位/缩量/板热；
+# 缺资金/板因子用 NaN（HistGBM 原生支持），禁止把空值填 0 假装有数据。
 FEATURE_SPEC: List[Tuple[str, str]] = [
     ("ret_1", "近1日涨跌"),
     ("ret_3", "近3日涨跌"),
@@ -43,6 +45,7 @@ FEATURE_SPEC: List[Tuple[str, str]] = [
     ("pct_from_high10", "距10日高%"),
     ("pct_from_high20", "距20日高%"),
     ("pct_from_high60", "距60日高%"),
+    ("pos_in_20range", "20日区间位置"),
     ("open_pos", "开盘位置"),
     ("close_pos", "收盘位置"),
     ("upper_wick", "上影占比"),
@@ -54,6 +57,8 @@ FEATURE_SPEC: List[Tuple[str, str]] = [
     ("vol_std10", "10日波动"),
     ("downside10", "10日下行偏差"),
     ("max_dd20", "20日最大回撤%"),
+    ("shrink_days_5", "近5日缩量天数"),
+    ("flat_days_10", "近10日横盘天数"),
     ("rs_index5", "相对300ETF_5日"),
     ("rs_index10", "相对300ETF_10日"),
     ("flow_1d", "主力流入1日亿"),
@@ -62,7 +67,10 @@ FEATURE_SPEC: List[Tuple[str, str]] = [
     ("flow_accel", "资金流入加速度"),
     ("board_pct_1", "主题板涨跌1日"),
     ("board_pct_5", "主题板涨跌5日"),
+    ("board_hot_days_10", "近10日板热天数"),
     ("rs_board_1", "相对主题板1日"),
+    ("rs_board_5", "相对主题板5日"),
+    ("underperform_hot_days_10", "板热个弱天数"),
     ("pct_rank_theme", "主题内涨跌分位"),
 ]
 
@@ -247,6 +255,7 @@ def features_from_bars(
     high10 = max(highs[-10:])
     high20 = max(highs[-20:]) if len(highs) >= 20 else high10
     high60 = max(highs[-60:]) if len(highs) >= 60 else high20
+    low20 = min(lows[-20:]) if len(lows) >= 20 else min(lows)
     v5 = sum(vols[-6:-1]) / 5.0 if len(vols) >= 6 else 0.0
     v10 = sum(vols[-11:-1]) / 10.0 if len(vols) >= 11 else v5
     yang, yin = _streaks(closes, opens)
@@ -272,11 +281,71 @@ def features_from_bars(
     rs5 = _index_ret(index_close_by_date, date, closes, dates, i, 5)
     rs10 = _index_ret(index_close_by_date, date, closes, dates, i, 10)
 
+    def _days_since_high(win: int) -> float:
+        hh = highs[-win:] if len(highs) >= win else highs
+        if not hh:
+            return 0.0
+        peak_v = max(hh)
+        # 从末根往前数到最近一次创该窗高
+        for back in range(len(hh)):
+            if highs[-1 - back] >= peak_v - 1e-9:
+                return float(back)
+        return float(len(hh) - 1)
+
+    # 缩量：当日量 < 近5日均量
+    shrink5 = 0
+    for j in range(min(5, len(vols))):
+        idx = -1 - j
+        base = vols[max(0, len(vols) + idx - 5) : len(vols) + idx]
+        base = [x for x in base if x is not None]
+        avg = (sum(base) / len(base)) if base else 0.0
+        if avg > 0 and vols[idx] < avg:
+            shrink5 += 1
+    shrink10 = 0
+    for j in range(min(10, len(vols))):
+        idx = -1 - j
+        base = vols[max(0, len(vols) + idx - 5) : len(vols) + idx]
+        base = [x for x in base if x is not None]
+        avg = (sum(base) / len(base)) if base else 0.0
+        if avg > 0 and vols[idx] < avg:
+            shrink10 += 1
+
+    flat10 = 0
+    for j in range(min(10, len(closes) - 1)):
+        prev = closes[-2 - j]
+        cur = closes[-1 - j]
+        if prev > 0 and abs(cur / prev - 1.0) * 100.0 < 1.5:
+            flat10 += 1
+
+    amps_recent = []
+    for j in range(min(10, len(closes))):
+        hh, ll, cc = highs[-1 - j], lows[-1 - j], closes[-1 - j]
+        if cc > 0:
+            amps_recent.append((hh - ll) / cc * 100.0)
+    amps_prev = []
+    for j in range(10, min(20, len(closes))):
+        hh, ll, cc = highs[-1 - j], lows[-1 - j], closes[-1 - j]
+        if cc > 0:
+            amps_prev.append((hh - ll) / cc * 100.0)
+    range_compress = (
+        (sum(amps_recent) / len(amps_recent)) / (sum(amps_prev) / len(amps_prev))
+        if amps_recent and amps_prev and sum(amps_prev) > 0
+        else 1.0
+    )
+    prev_c = closes[-2] if len(closes) >= 2 else o
+    gap_down = 1.0 if prev_c > 0 and (o / prev_c - 1.0) * 100.0 <= -0.8 else 0.0
+    recover_close = (
+        1.0 if gap_down >= 1.0 and (c >= o or (c - l) / span >= 0.55) else 0.0
+    )
+    pos20 = (c - low20) / max(high20 - low20, 1e-6)
+
     return {
         "ret_1": _ret(1),
         "ret_3": _ret(3),
         "ret_5": _ret(5),
         "ret_10": _ret(10),
+        "ret_20": _ret(20),
+        "ret_60": _ret(60) if len(closes) > 60 else _ret(min(60, len(closes) - 1)),
         "vol_ratio5": (vols[-1] / v5) if v5 > 0 else 1.0,
         "vol_ratio10": (vols[-1] / v10) if v10 > 0 else 1.0,
         "dist_ma5": (c / ma5 - 1.0) * 100.0 if ma5 > 0 else 0.0,
@@ -286,6 +355,10 @@ def features_from_bars(
         "pct_from_high10": (c / high10 - 1.0) * 100.0 if high10 > 0 else 0.0,
         "pct_from_high20": (c / high20 - 1.0) * 100.0 if high20 > 0 else 0.0,
         "pct_from_high60": (c / high60 - 1.0) * 100.0 if high60 > 0 else 0.0,
+        "pct_from_low20": (c / low20 - 1.0) * 100.0 if low20 > 0 else 0.0,
+        "pos_in_20range": float(pos20),
+        "days_since_high20": _days_since_high(20),
+        "days_since_high60": _days_since_high(60),
         "open_pos": (o - l) / span,
         "close_pos": (c - l) / span,
         "upper_wick": (h - max(o, c)) / span,
@@ -297,16 +370,15 @@ def features_from_bars(
         "vol_std10": _std(rets),
         "downside10": _std(downside) if downside else 0.0,
         "max_dd20": max_dd,
+        "shrink_days_5": float(shrink5),
+        "shrink_days_10": float(shrink10),
+        "flat_days_10": float(flat10),
+        "range_compress_10": float(range_compress),
+        "gap_down": gap_down,
+        "recover_close": recover_close,
         "rs_index5": rs5,
         "rs_index10": rs10,
-        "flow_1d": 0.0,
-        "flow_3d": 0.0,
-        "flow_5d": 0.0,
-        "flow_accel": 0.0,
-        "board_pct_1": 0.0,
-        "board_pct_5": 0.0,
-        "rs_board_1": 0.0,
-        "pct_rank_theme": 0.5,
+        # 资金/板/主题分位：无面板数据时不写键，feature_vector 用 NaN（禁止填 0 假装有流入）
     }
 
 
@@ -319,22 +391,28 @@ def apply_flow_board_features(
     """把因子库/盘中资金与主题板填进特征（训练与推理共用键）。"""
     out = dict(feat or {})
     if panel_row:
-        if panel_row.get("main_net_yi") is not None:
-            out["flow_1d"] = _f(panel_row.get("main_net_yi"))
-        if panel_row.get("flow_3d") is not None:
-            out["flow_3d"] = _f(panel_row.get("flow_3d"))
-        if panel_row.get("flow_5d") is not None:
-            out["flow_5d"] = _f(panel_row.get("flow_5d"))
-        if panel_row.get("flow_accel") is not None:
-            out["flow_accel"] = _f(panel_row.get("flow_accel"))
-        if panel_row.get("board_pct") is not None:
-            out["board_pct_1"] = _f(panel_row.get("board_pct"))
-        if panel_row.get("board_pct_5") is not None:
-            out["board_pct_5"] = _f(panel_row.get("board_pct_5"))
-        if panel_row.get("rs_board") is not None:
-            out["rs_board_1"] = _f(panel_row.get("rs_board"))
-        if panel_row.get("pct_rank_theme") is not None:
-            out["pct_rank_theme"] = _f(panel_row.get("pct_rank_theme"), 0.5)
+        for src, dst in (
+            ("main_net_yi", "flow_1d"),
+            ("flow_3d", "flow_3d"),
+            ("flow_5d", "flow_5d"),
+            ("flow_accel", "flow_accel"),
+            ("board_pct", "board_pct_1"),
+            ("board_pct_2", "board_pct_2"),
+            ("board_pct_5", "board_pct_5"),
+            ("board_pct_10", "board_pct_10"),
+            ("board_hot_days_10", "board_hot_days_10"),
+            ("board_flow_pos_days_10", "board_flow_pos_days_10"),
+            ("board_max_pct_10", "board_max_pct_10"),
+            ("board_min_pct_10", "board_min_pct_10"),
+            ("rs_board", "rs_board_1"),
+            ("rs_board_3", "rs_board_3"),
+            ("rs_board_5", "rs_board_5"),
+            ("rs_board_on_hot", "rs_board_on_hot"),
+            ("underperform_hot_days_10", "underperform_hot_days_10"),
+            ("pct_rank_theme", "pct_rank_theme"),
+        ):
+            if panel_row.get(src) is not None:
+                out[dst] = _f(panel_row.get(src))
     if live:
         # live 可覆盖当日（盘中更新）
         if live.get("flow") is not None:
@@ -347,7 +425,17 @@ def apply_flow_board_features(
 
 
 def feature_vector(feat: Dict[str, float]) -> List[float]:
-    return [_f(feat.get(k)) for k in FEATURE_KEYS]
+    """缺测写成 NaN，让 HistGBM 学「没数据」；禁止把资金空窗填 0。"""
+    out: List[float] = []
+    for k in FEATURE_KEYS:
+        if feat is None or k not in feat or feat.get(k) is None:
+            out.append(float("nan"))
+        else:
+            try:
+                out.append(float(feat.get(k)))  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                out.append(float("nan"))
+    return out
 
 
 def _forward_label(
@@ -705,7 +793,51 @@ def train_short_gbdt(
 
     X = np.asarray(xs, dtype=float)
     y = np.asarray(ys, dtype=float)
-    medians = np.median(X, axis=0)
+
+    # 资金史未养满时：3–7 月几乎全空。拿全历史硬训会被空窗稀释（RankIC 从 ~0.08 掉到 ~0.05）。
+    # 有足够「真有资金」样本时，只用这些行；否则退回全量。
+    flow_idx = FEATURE_KEYS.index("flow_1d") if "flow_1d" in FEATURE_KEYS else None
+    train_filter = "all"
+    if flow_idx is not None:
+        has_flow = ~np.isnan(X[:, flow_idx])
+        flow_cov = float(np.mean(has_flow))
+        meta["flow_cov_before_filter"] = flow_cov
+        if flow_cov < 0.55 and int(has_flow.sum()) >= max(min_samples, 2500):
+            # 自动找资金覆盖≥80%的首月，从该月起训（避免硬编码日期）
+            month_ok: Dict[str, List[int]] = {}
+            for i, d in enumerate(ds):
+                m = str(d)[:6]
+                bucket = month_ok.setdefault(m, [0, 0])
+                bucket[1] += 1
+                if bool(has_flow[i]):
+                    bucket[0] += 1
+            start_m = None
+            for m in sorted(month_ok):
+                ok_n, tot = month_ok[m]
+                if tot >= 80 and (ok_n / tot) >= 0.8:
+                    start_m = m
+                    break
+            if start_m:
+                start_d = start_m + "01"
+                keep = np.array([str(d) >= start_d for d in ds], dtype=bool)
+                X, y = X[keep], y[keep]
+                ds = [ds[i] for i, ok in enumerate(keep.tolist()) if ok]
+                train_filter = f"from_{start_m}"
+            else:
+                X, y = X[has_flow], y[has_flow]
+                ds = [ds[i] for i, ok in enumerate(has_flow.tolist()) if ok]
+                train_filter = "has_flow_only"
+
+    meta["train_filter"] = train_filter
+    meta["n_samples"] = int(len(y))
+    if len(y) < min_samples:
+        meta["ok"] = False
+        meta["why"] = f"过滤后样本{len(y)}<{min_samples}（filter={train_filter}）"
+        return meta
+
+    medians = np.nanmedian(X, axis=0)
+    # nanmedian 全空列会是 nan；解释时再回落 0
+    medians = np.where(np.isnan(medians), 0.0, medians)
     Xtr, ytr, Xte, yte = _time_split(X, y, ds, test_ratio=0.2)
 
     model = HistGradientBoostingRegressor(
@@ -726,8 +858,31 @@ def train_short_gbdt(
         order = np.argsort(pred)
         k = max(1, len(pred) // 5)
         spread = float(np.mean(yte[order[-k:]]) - np.mean(yte[order[:k]]))
+        # 按月 RankIC：单次末段数字噪声大，月均更稳
+        te_dates = sorted(range(len(ds)), key=lambda i: ds[i])
+        te_dates = [ds[i] for i in te_dates][len(ytr) :]
+        by_m: Dict[str, List[Tuple[float, float]]] = {}
+        for i, d in enumerate(te_dates):
+            by_m.setdefault(str(d)[:6], []).append((float(pred[i]), float(yte[i])))
+        month_ics: Dict[str, float] = {}
+        for m, pairs in by_m.items():
+            if len(pairs) < 30:
+                continue
+            ps = [a for a, _ in pairs]
+            ys_m = [b for _, b in pairs]
+            ric_m = _rank_ic(ps, ys_m)
+            if ric_m is not None:
+                month_ics[m] = float(ric_m)
+        ric_month_mean = (
+            float(sum(month_ics.values()) / len(month_ics)) if month_ics else None
+        )
     except Exception:
         mae, hit, ric, spread = None, None, None, None
+        month_ics, ric_month_mean = {}, None
+
+    flow_nan_pct = None
+    if flow_idx is not None and len(X):
+        flow_nan_pct = float(np.mean(np.isnan(X[:, flow_idx])))
 
     payload = {
         "model": model,
@@ -740,11 +895,15 @@ def train_short_gbdt(
             "mae": mae,
             "dir_hit": hit,
             "rank_ic": ric,
+            "rank_ic_month_mean": ric_month_mean,
+            "rank_ic_by_month": month_ics,
             "long_short_spread": spread,
             "n_train": int(len(ytr)),
             "n_test": int(len(yte)),
             "date_min": min(ds) if ds else None,
             "date_max": max(ds) if ds else None,
+            "flow_nan_pct": flow_nan_pct,
+            "missing_as": "nan",
         },
     }
     if persist:
@@ -972,9 +1131,12 @@ def score_short_ml(
             score = pred + live_boost
             backend = "hist_gbdt"
             med = medians or [0.0] * len(FEATURE_KEYS)
-            cons = _contrib_by_shap(model, x) or _contrib_by_median_replace(
-                model, x, med
-            )
+            try:
+                cons = _contrib_by_shap(model, x) or _contrib_by_median_replace(
+                    model, x, med
+                )
+            except Exception:
+                cons = []
             if live_f:
                 extra = _heuristic_contribs({}, live_f)
                 cons = list(cons) + [
@@ -1002,11 +1164,19 @@ def blend_short_rank(
     rule_score: float,
     ml_score: float,
     *,
-    rule_w: float = 0.25,
-    ml_w: float = 0.75,
+    rule_w: float = 0.2,
+    ml_w: float = 0.8,
 ) -> float:
-    """规则短线分与 ML 分融合；ML 主导排序。"""
-    ml_scaled = 5.0 + float(ml_score) * 2.2
+    """规则短线分与 ML 分融合；ML 主导排序。
+
+    hist_gbdt 预测的是超额收益%（常见约 -2～+2）；启发式分在 0～8。
+    对小数预测放大，避免规则分继续盖过模型。
+    """
+    ms = float(ml_score)
+    if abs(ms) <= 3.5:
+        ml_scaled = 5.0 + ms * 3.5  # GBDT 超额收益尺度
+    else:
+        ml_scaled = 5.0 + ms * 1.1  # heuristic 尺度
     return rule_w * float(rule_score) + ml_w * ml_scaled
 
 

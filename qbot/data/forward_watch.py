@@ -32,7 +32,7 @@ import json
 import re
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -1598,11 +1598,14 @@ THEME_HINTS: List[Dict[str, Any]] = [
             ("600498", "烽火通信"),
             # 电力电缆+光/箔：跟线缆/光纤热度，电网板平它也能独涨
             ("603618", "杭电股份"),
+            # 特种光纤弹性：与中军同规则，量价/位置到位才推，无特殊黑名单
+            ("688143", "长盈通"),
         ],
         "thesis": (
             "光纤光缆有独立涨价/供需周期（AI基建、出口、供给偏紧），"
             "与光模块不是同一条腿；杭电偏电力电缆/线缆弹性，常跟线缆部件与光纤概念，"
-            "不必等变压器中军一起动；杀跌后起稳可观察，涨停日不追。"
+            "长盈通偏特种光纤弹性，按普通票量价与位置推，涨停/高潮日不追；"
+            "不必等变压器中军一起动；杀跌后起稳可观察。"
         ),
     },
     {
@@ -1827,6 +1830,45 @@ _BROAD_KEY_BLOCK_SUFFIX: Dict[str, Tuple[str, ...]] = {
 
 def _today() -> str:
     return datetime.now().strftime("%Y-%m-%d")
+
+
+def _is_weekday_ymd(ymd: str) -> bool:
+    """YYYY-MM-DD 是否为周一～周五（不做节假日库，先挡周末假连入）。"""
+    try:
+        return datetime.strptime(str(ymd)[:10], "%Y-%m-%d").weekday() < 5
+    except ValueError:
+        return False
+
+
+def _forward_asof_date(now: Optional[datetime] = None) -> str:
+    """前瞻记账/连入用的会话日 = 最近一个「已收盘或可计」的工作日。
+
+    - 周六日重刷：仍记上周五，不因日历多一天而连入+1、解星级封顶
+    - 工作日开盘前（9:25前）：仍记上一工作日，避免用昨收冒充「今日走强」加连入
+    - 工作日开盘后：记当日
+    """
+    now = now or datetime.now()
+    d = now.date()
+    # 周末 → 回退到周五
+    while d.weekday() >= 5:
+        d -= timedelta(days=1)
+    # 开盘前仍属上一交易日会话
+    if now.weekday() < 5 and (now.hour, now.minute) < (9, 25):
+        d -= timedelta(days=1)
+        while d.weekday() >= 5:
+            d -= timedelta(days=1)
+    return d.strftime("%Y-%m-%d")
+
+
+def _purge_weekend_history_days(history: Dict[str, Any]) -> int:
+    """删掉误写入的周六日 history 键，避免连入回看踩到假日。"""
+    days = history.get("days") or {}
+    if not isinstance(days, dict):
+        return 0
+    drop = [k for k in list(days.keys()) if not _is_weekday_ymd(str(k))]
+    for k in drop:
+        days.pop(k, None)
+    return len(drop)
 
 
 def _to_float(v) -> Optional[float]:
@@ -2512,6 +2554,7 @@ def _load_history() -> Dict[str, Any]:
     try:
         data = json.loads(HISTORY_PATH.read_text(encoding="utf-8"))
         if isinstance(data, dict) and isinstance(data.get("days"), dict):
+            _purge_weekend_history_days(data)
             return data
     except Exception:
         pass
@@ -2519,6 +2562,8 @@ def _load_history() -> Dict[str, Any]:
 
 
 def _save_history(data: Dict[str, Any]) -> None:
+    if isinstance(data, dict):
+        _purge_weekend_history_days(data)
     HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
     HISTORY_PATH.write_text(
         json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -4394,12 +4439,17 @@ def discover_theme_universe(
 
 
 def _consecutive_good_days(history: Dict[str, Any], code: str, asof: str) -> int:
-    """asof 之前连续「走强」天数（仅走强计连入；旧数据 ok=True 视为走强）。"""
+    """asof 之前连续「走强」天数（仅走强计连入；旧数据 ok=True 视为走强）。
+
+    只看工作日快照；周末误写入的键直接跳过，不打断也不加计。
+    """
     days = sorted(d for d in (history.get("days") or {}) if d < asof)
     if not days:
         return 0
     streak = 0
     for d in reversed(days):
+        if not _is_weekday_ymd(d):
+            continue
         day = history["days"].get(d) or {}
         codes = set(day.get("codes") or [])
         if code not in codes:
@@ -4425,6 +4475,8 @@ def _consecutive_bad_days(history: Dict[str, Any], code: str, asof: str) -> int:
         return 0
     streak = 0
     for d in reversed(days):
+        if not _is_weekday_ymd(d):
+            continue
         day = history["days"].get(d) or {}
         codes = set(day.get("codes") or [])
         if code not in codes:
@@ -4753,6 +4805,8 @@ def _theme_recent_streak(
         return 0
     streak = 0
     for d in reversed(days):
+        if not _is_weekday_ymd(d):
+            continue
         day = history["days"].get(d) or {}
         if _theme_in_day(day, theme):
             streak += 1
@@ -4765,7 +4819,11 @@ def _theme_recent_presence(
     history: Dict[str, Any], theme: Dict[str, Any], asof: str, lookback: int = 12
 ) -> int:
     """asof 之前 lookback 日内曾在池的天数（不要求连续）。用于防断一日就丢粘性。"""
-    days = sorted(d for d in (history.get("days") or {}) if d < asof)[-lookback:]
+    days = sorted(
+        d
+        for d in (history.get("days") or {})
+        if d < asof and _is_weekday_ymd(d)
+    )[-lookback:]
     if not days:
         return 0
     return sum(1 for d in days if _theme_in_day(history["days"].get(d) or {}, theme))
@@ -4780,6 +4838,8 @@ def _theme_consecutive_bad_days(
         return 0
     streak = 0
     for d in reversed(days):
+        if not _is_weekday_ymd(d):
+            continue
         day = history["days"].get(d) or {}
         if not _theme_in_day(day, theme):
             break
@@ -4805,6 +4865,8 @@ def _theme_consecutive_good_days(
         return 0
     streak = 0
     for d in reversed(days):
+        if not _is_weekday_ymd(d):
+            continue
         day = history["days"].get(d) or {}
         if not _theme_in_day(day, theme):
             break
@@ -6305,11 +6367,13 @@ _DAILY_SHORT_BOARD_SEEDS: Dict[str, List[Tuple[str, str]]] = {
         ("600522", "中天科技"),
         ("600498", "烽火通信"),
         ("603618", "杭电股份"),
+        ("688143", "长盈通"),
     ],
     "光纤概念": [
         ("600487", "亨通光电"),
         ("601869", "长飞光纤"),
         ("603618", "杭电股份"),
+        ("688143", "长盈通"),
     ],
     "线缆部件及其他": [
         ("603618", "杭电股份"),
@@ -6628,6 +6692,7 @@ _DAILY_SHORT_NEWS_SEEDS: List[Tuple[Tuple[str, ...], str, List[Tuple[str, str]]]
             ("601869", "长飞光纤"),
             ("600487", "亨通光电"),
             ("603618", "杭电股份"),
+            ("688143", "长盈通"),
         ],
     ),
     (
@@ -7216,11 +7281,34 @@ def _prefetch_risk_bars(
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         list(pool.map(_one, todo, chunksize=max(1, (len(todo) + workers - 1) // workers)))
+    # 第二遍：仅本地因子库补洞（16:05 存库已负责网拉）；禁止串行慢网拖死刷新
+    miss = [c for c in todo if not _RISK_BARS_CACHE.get(f"{c}:{end}")]
+
+    def _fill_store(code: str) -> None:
+        out = _bars_from_ml_store(code, end, int(fetch_n))
+        if out:
+            _RISK_BARS_CACHE[f"{code}:{end}"] = out
+
+    if miss:
+        sw = min(workers, max(4, len(miss)))
+        with ThreadPoolExecutor(max_workers=sw) as pool:
+            list(pool.map(_fill_store, miss, chunksize=max(1, (len(miss) + sw - 1) // sw)))
     return len(todo)
 
 
 def _asof_yyyymmdd(asof: str) -> str:
     return str(asof or "").replace("-", "")[:8]
+
+
+def _bars_from_ml_store(code: str, end: str, limit: int) -> List[Dict[str, Any]]:
+    """本地因子库回退：网络拉空时仍能算风险/ML。"""
+    try:
+        from qbot.data import ml_factor_store as store
+
+        bars = store.load_bars_from_store(code, limit=int(limit)) or []
+    except Exception:
+        return []
+    return [b for b in bars if str(b.get("date") or "")[:8] <= end]
 
 
 def _get_risk_bars(
@@ -7234,7 +7322,8 @@ def _get_risk_bars(
     """取截止 asof 的日K（含开收），供阳线连阳与 CFA 波动/回撤。
 
     缓存键不含 limit：预拉 90 根后，风险(28)/ML(90) 共用，避免二次串行拉网。
-    fast_fetch 先走东财短超时；失败时默认只做一次多源回退（非 3 次重试）。
+    fast_fetch 先走东财短超时；失败则本地库（不做慢网）；非 fast 且 allow_slow_fallback 才慢拉。
+    空结果不永久占坑（否则 ML 全变 heuristic）。
     """
     code = str(code or "").zfill(6)
     end = _asof_yyyymmdd(asof)
@@ -7243,10 +7332,13 @@ def _get_risk_bars(
     need = max(int(limit or 1), 1)
     fetch_n = max(need, _RISK_BARS_FETCH_LIMIT)
     key = f"{code}:{end}"
-    # 键已存在=本刷新已拉过（即使根数不足也不再串行重打）
     if key in _RISK_BARS_CACHE:
         cached = _RISK_BARS_CACHE[key]
-        return cached[-need:] if len(cached) > need else list(cached)
+        # 有数据：直接复用；空缓存：允许再拉（预拉失败不能锁死整晚）
+        if cached:
+            return cached[-need:] if len(cached) > need else list(cached)
+        if not allow_slow_fallback:
+            return []
 
     bars: List[Dict[str, Any]] = []
     try:
@@ -7257,15 +7349,18 @@ def _get_risk_bars(
     except Exception:
         bars = []
     out = [b for b in bars if str(b.get("date") or "")[:8] <= end]
-    if not out and allow_slow_fallback:
+    # 慢网补拉只留给显式非 fast 路径；fast/评分阶段空结果直接本地库，避免刷新串行卡死
+    if not out and allow_slow_fallback and not fast_fetch:
         try:
-            # 单次多源回退；禁止走 _fetch_kline_bars 的 3 次 sleep 重试
             bars = _fetch_kline_bars_once(code, end, limit=int(fetch_n)) or []
         except Exception:
             bars = []
         out = [b for b in bars if str(b.get("date") or "")[:8] <= end]
-    # 无论成败都写入，避免同刷新内重复打点；空列表=已知拉不到
-    _RISK_BARS_CACHE[key] = out
+    if not out:
+        out = _bars_from_ml_store(code, end, int(fetch_n))
+    # 只缓存成功结果；空的不写，避免并行预拉失败后全体 heuristic
+    if out:
+        _RISK_BARS_CACHE[key] = out
     return out[-need:] if len(out) > need else list(out)
 
 
@@ -7907,7 +8002,7 @@ def build_daily_short_picks(
 
     _clear_risk_bars_cache()
     history = _load_history()
-    asof = _today()
+    asof = _forward_asof_date()
 
     ranked_boards: List[Tuple[float, Dict[str, Any], int, List[str]]] = []
     if not boards.empty:
@@ -8070,16 +8165,12 @@ def build_daily_short_picks(
         pct5 = _to_float(q.get("涨跌幅_5日"))
         flow = _to_float(q.get("主力净流入_亿"))
         flow5 = _to_float(q.get("主力净流入_5日_亿"))
-        mkt = _to_float(q.get("总市值_亿"))
         vol_ratio = _to_float(q.get("量比"))
         turnover = _to_float(q.get("换手率"))
         disp_name = str(q.get("名称") or name)
 
-        # 短线：避开过小票与超大压舱；股价过高一手成本太大
-        if mkt is not None and (mkt < 35 or mkt > 4500):
-            continue
-        if code in {"300750", "600519", "601318", "601398"}:
-            continue
+        # 只保留你定过的硬门：股价≥800 一手过贵。
+        # 市值大小/中军钝/流动性差交给 ML 分与板强个弱等，不再用市值 if 一刀切。
         if px is not None and float(px) >= _MAX_TRADE_PRICE:
             continue
         if pct is not None and (pct >= 5.0 or pct <= -3.5):
@@ -8401,7 +8492,7 @@ def build_forward_watch(
         except Exception:  # noqa: BLE001
             pass
 
-    asof = _today()
+    asof = _forward_asof_date()
     err_parts: List[str] = []
     news = pd.DataFrame()
     boards = pd.DataFrame()
@@ -9102,10 +9193,31 @@ def build_forward_watch(
                 )
             if factor_why:
                 evidence.append(f"【因子贡献】{factor_why}")
-            # 与短池一致：ML 偏弱仅提示，不撤买入候选（硬门槛留给涨停/作废线等）
-            if ml_score is not None and float(ml_score) <= -1.2:
+            # GBDT 负期望：观察池候选降权为否（硬纪律仍规则；预测交给 ML）
+            ml_backend = str(ml_pack.get("backend") or "")
+            if (
+                buy_ready
+                and ml_score is not None
+                and ml_backend == "hist_gbdt"
+                and float(ml_score) <= -0.15
+            ):
+                buy_ready = False
+                buy_method = ""
                 evidence.append(
-                    f"【ML偏弱】{float(ml_score):+.2f}，降权观察，不否决 D/E 候选"
+                    f"【ML否决】{float(ml_score):+.2f}（hist_gbdt 负期望，近高/弱催化样本降权）"
+                )
+            elif ml_score is not None and float(ml_score) <= -1.2:
+                evidence.append(
+                    f"【ML偏弱】{float(ml_score):+.2f}，降权观察"
+                )
+            elif (
+                buy_ready
+                and ml_score is not None
+                and ml_backend == "hist_gbdt"
+                and float(ml_score) >= 0.25
+            ):
+                evidence.append(
+                    f"【ML偏多】{float(ml_score):+.2f}，短窗超额偏正"
                 )
             if news_hits:
                 evidence.append("【新闻】" + "；".join(news_hits[:3]))
@@ -9340,6 +9452,7 @@ def build_forward_watch(
 
     if persist:
         history.setdefault("days", {})
+        dropped_weekend = _purge_weekend_history_days(history)
         history["days"][asof] = {
             "codes": codes_today,
             "status": status_today,
@@ -9353,6 +9466,9 @@ def build_forward_watch(
         history["days"] = {d: history["days"][d] for d in keep_days}
         _save_history(history)
         _save_latest(payload)
+        if dropped_weekend:
+            # 仅日志；payload 里已有 asof
+            pass
 
     _prog(100, "前瞻分析完成")
     set_board_fetch_fast(False)

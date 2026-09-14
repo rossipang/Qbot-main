@@ -180,9 +180,29 @@ def upsert_stock_days(
     rows: Sequence[Dict[str, Any]],
     *,
     path: Optional[Path] = None,
+    require_useful: bool = False,
 ) -> int:
+    """写入/更新个股日行。
+
+    require_useful=True 时：
+    - 新插入必须有有效 close>0，或有效 main_net_yi（允许为 0）
+    - 禁止写入「只有 code/date、全是空」的垃圾行
+    - 资金更新若 main_net_yi 为空则跳过该字段（不覆盖已有真值成空）
+    """
     if not rows:
         return 0
+
+    def _num(x: Any) -> Optional[float]:
+        if x is None:
+            return None
+        try:
+            v = float(x)
+        except (TypeError, ValueError):
+            return None
+        if v != v:
+            return None
+        return v
+
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     with connect(path) as conn:
         n = 0
@@ -191,18 +211,30 @@ def upsert_stock_days(
             date = str(r.get("date") or "").replace("-", "")[:8]
             if len(code) != 6 or len(date) != 8:
                 continue
+            close_in = _num(r.get("close"))
+            main_in = _num(r.get("main_net_yi"))
             # 部分更新：已有 OHLCV 时只补资金，不把 close 写成 NULL
             existing = conn.execute(
                 "SELECT close, main_net_yi FROM stock_day WHERE code=? AND date=?",
                 (code, date),
             ).fetchone()
+            if require_useful:
+                # 纯垃圾：既无有效收盘也无有效资金
+                if existing is None and (close_in is None or close_in <= 0) and main_in is None:
+                    continue
+                # 资金补丁行：无主力净流入则整行跳过（避免写空 flow_source）
+                if (
+                    close_in is None
+                    and main_in is None
+                    and r.get("open") is None
+                    and r.get("high") is None
+                ):
+                    continue
             if existing:
-                close = r.get("close") if r.get("close") is not None else existing["close"]
-                main = (
-                    r.get("main_net_yi")
-                    if r.get("main_net_yi") is not None
-                    else existing["main_net_yi"]
-                )
+                close = close_in if close_in is not None else existing["close"]
+                main = main_in if main_in is not None else existing["main_net_yi"]
+                if require_useful and (close is None or float(close) <= 0) and main is None:
+                    continue
                 conn.execute(
                     """
                     UPDATE stock_day SET
@@ -226,14 +258,16 @@ def upsert_stock_days(
                         r.get("volume"),
                         r.get("pct"),
                         main,
-                        r.get("main_pct"),
-                        r.get("flow_source"),
+                        r.get("main_pct") if main_in is not None else None,
+                        r.get("flow_source") if main_in is not None else None,
                         now,
                         code,
                         date,
                     ),
                 )
             else:
+                if require_useful and (close_in is None or close_in <= 0) and main_in is None:
+                    continue
                 conn.execute(
                     """
                     INSERT INTO stock_day(
@@ -250,9 +284,9 @@ def upsert_stock_days(
                         r.get("close"),
                         r.get("volume"),
                         r.get("pct"),
-                        r.get("main_net_yi"),
-                        r.get("main_pct"),
-                        r.get("flow_source"),
+                        main_in,
+                        r.get("main_pct") if main_in is not None else None,
+                        r.get("flow_source") if main_in is not None else None,
                         now,
                     ),
                 )
@@ -529,7 +563,7 @@ def load_flow_board_panel(
             "theme_id": theme_id,
             "rs_board": (pct - bp) if pct is not None and bp is not None else None,
         }
-    # rolling 3/5
+    # rolling 3/5 + 中窗板温（单位 ML_FACTOR_TRAINING §2）
     for i, d in enumerate(dates):
         def _sum_last(k: int) -> Optional[float]:
             chunk = flows[max(0, i - k + 1) : i + 1]
@@ -548,16 +582,80 @@ def load_flow_board_panel(
             out[d]["flow_accel"] = (
                 float(a - b) if a is not None and b is not None else None
             )
-        # board 5d sum of theme daily pct
+        # board windows
         if theme_id:
-            b5 = []
-            for j in range(max(0, i - 4), i + 1):
-                bd = dates[j]
-                if bd in board_map:
-                    b5.append(board_map[bd])
-            out[d]["board_pct_5"] = float(sum(b5)) if b5 else None
+            def _board_sum(k: int) -> Optional[float]:
+                vals = []
+                for j in range(max(0, i - k + 1), i + 1):
+                    bd = dates[j]
+                    if bd in board_map:
+                        vals.append(board_map[bd])
+                return float(sum(vals)) if vals else None
+
+            out[d]["board_pct_2"] = _board_sum(2)
+            out[d]["board_pct_5"] = _board_sum(5)
+            out[d]["board_pct_10"] = _board_sum(10)
+            b10 = [
+                board_map[dates[j]]
+                for j in range(max(0, i - 9), i + 1)
+                if dates[j] in board_map
+            ]
+            out[d]["board_hot_days_10"] = float(sum(1 for x in b10 if x >= 0.8))
+            out[d]["board_max_pct_10"] = float(max(b10)) if b10 else None
+            out[d]["board_min_pct_10"] = float(min(b10)) if b10 else None
+            # 主题板无独立资金列时，用成员流入>0 天数近似「板流入活跃」
+            f10 = [
+                flows[j]
+                for j in range(max(0, i - 9), i + 1)
+                if flows[j] is not None
+            ]
+            out[d]["board_flow_pos_days_10"] = float(
+                sum(1 for x in f10 if x is not None and float(x) > 0)
+            )
+            pct = out[d].get("pct")
+            bp = out[d].get("board_pct")
+            # rs 3/5：个股累计 − 板累计
+            def _stock_sum(k: int) -> Optional[float]:
+                vals = []
+                for j in range(max(0, i - k + 1), i + 1):
+                    p = out[dates[j]].get("pct")
+                    if p is not None:
+                        vals.append(float(p))
+                return float(sum(vals)) if vals else None
+
+            s3, b3 = _stock_sum(3), _board_sum(3)
+            s5, b5 = _stock_sum(5), _board_sum(5)
+            out[d]["rs_board_3"] = (
+                float(s3 - b3) if s3 is not None and b3 is not None else None
+            )
+            out[d]["rs_board_5"] = (
+                float(s5 - b5) if s5 is not None and b5 is not None else None
+            )
+            if pct is not None and bp is not None and float(bp) >= 1.5:
+                out[d]["rs_board_on_hot"] = float(pct) - float(bp)
+            else:
+                out[d]["rs_board_on_hot"] = 0.0
+            under = 0
+            for j in range(max(0, i - 9), i + 1):
+                pj = out[dates[j]].get("pct")
+                bj = out[dates[j]].get("board_pct")
+                if pj is None or bj is None:
+                    continue
+                if float(bj) >= 1.0 and (float(pj) - float(bj)) <= -1.0:
+                    under += 1
+            out[d]["underperform_hot_days_10"] = float(under)
         else:
+            out[d]["board_pct_2"] = None
             out[d]["board_pct_5"] = None
+            out[d]["board_pct_10"] = None
+            out[d]["board_hot_days_10"] = None
+            out[d]["board_flow_pos_days_10"] = None
+            out[d]["board_max_pct_10"] = None
+            out[d]["board_min_pct_10"] = None
+            out[d]["rs_board_3"] = None
+            out[d]["rs_board_5"] = None
+            out[d]["rs_board_on_hot"] = None
+            out[d]["underperform_hot_days_10"] = None
     return out
 
 
