@@ -88,6 +88,8 @@ ipython_config.py
 
 # pyenv
 .python-version
+# 自动卖专用 32 位 Python（勿提交）
+.python32/
 
 # pipenv
 #   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.

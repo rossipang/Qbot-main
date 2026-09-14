@@ -56,5 +56,9 @@ class UniversalClientTrader(clienttrader.BaseLoginClientTrader):
             )
 
         self._close_prompt_windows()
-        self._main = self._app.window(title="网上股票交易系统5.0")
+        try:
+            self._main = self._app.window(title_re=r".*网上股票交易系统5\.0.*")
+            self._main.wait("exists enabled visible ready", timeout=8)
+        except Exception:
+            self._main = self._app.window(title="网上股票交易系统5.0")
 

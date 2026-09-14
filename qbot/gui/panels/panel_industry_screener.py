@@ -674,7 +674,9 @@ class IndustryScreenerPanel(wx.Panel):
                 return fetch_hot_news(40)
 
             def _load_boards():
-                return fetch_industry_boards()
+                # 列表只要行业/概念页；连板/连阳/三连阳逐股日K扫描放到点选，
+                # 否则 beg 过大或东财慢时 120s 超时，整表被清空。
+                return fetch_industry_boards(fast=True)
 
             try:
                 with ThreadPoolExecutor(max_workers=2) as pool:

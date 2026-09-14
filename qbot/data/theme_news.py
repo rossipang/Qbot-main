@@ -217,20 +217,28 @@ def fetch_cctv_news(limit: int = 12) -> List[dict]:
     return rows
 
 
-def fetch_cross_platform_theme_news(*, fast: bool = True) -> List[dict]:
+def fetch_cross_platform_theme_news(
+    *,
+    fast: bool = True,
+    cls_limit: int = 0,
+    ws_limit: int = 0,
+) -> List[dict]:
     """每日刷新用时效快讯（近一周）：财联社 + 见闻；非 fast 再加央视。
 
     故意不做题材关键词搜索——那会把几个月前旧稿塞进池子。
+    cls_limit/ws_limit：摘要可加宽条数，避免全球频道里英伟达/AI叙事被截断。
     """
     rows: List[dict] = []
+    cls_n = int(cls_limit) if cls_limit else (40 if fast else 50)
+    ws_n = int(ws_limit) if ws_limit else (40 if fast else 60)
     try:
-        rows.extend(fetch_cls_telegraph(limit=40 if fast else 50))
+        rows.extend(fetch_cls_telegraph(limit=cls_n))
     except Exception:
         pass
     try:
         rows.extend(
             fetch_wallstreet_lives(
-                limit=40 if fast else 60,
+                limit=ws_n,
                 channels=["a-stock-channel", "global"],
             )
         )

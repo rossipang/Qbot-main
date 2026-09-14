@@ -2,9 +2,10 @@
 """每日新闻大事：近 1～3 日硬叙事催化 → 分栏 + 相关板块利好/利空。
 
 初衷：提前看见可交易叙事，而不是A股事后行情战报。
-保留示例：英伟达财报/大会、科技重大发明与量产、厄尔尼诺/粮价、战争→军工航天、金价突破；
-以及美股/亚太盘前隔夜（费城半导体、纳指涨跌）——作A股开盘参考。
-丢掉示例：凯莱英冲高近X%、摩尔跌多少、境内ETF标的指数涨跌软广、A股板块午后纷纷拉升。
+保留示例：英伟达财报/大会、AI资本开支放缓、科技重大发明与量产、厄尔尼诺/粮价、
+战争→军工航天、金价突破；以及美股/亚太盘前隔夜（费城半导体、纳指涨跌）——作A股开盘参考。
+丢掉示例：凯莱英冲高近X%、摩尔跌多少、境内ETF标的指数涨跌软广、A股板块午后纷纷拉升；
+个股「暂没有/未涉及」业务澄清、AI漫剧估值泡沫蹭炒——一律不当大事。
 
 启动默认刷近 3 天（优先当天），写入 json + html，供 GUI 网页版面展示。
 """
@@ -61,8 +62,9 @@ _CATEGORY_RULES: List[Tuple[str, Tuple[str, ...]]] = (
         "AI应用",
         (
             "AIGC", "短剧", "人工智能应用", "大模型", "OpenAI", "Anthropic",
-            "Hugging Face", "机器人", "具身", "AI语料", "数字媒体", "软件",
-            "办公软件", "金山",
+            "Amodei", "Altman", "Hugging Face", "机器人", "具身", "AI语料",
+            "数字媒体", "软件", "办公软件", "金山",
+            "AI放缓", "资本开支", "CAPEX",
         ),
     ),
     (
@@ -113,6 +115,7 @@ _BOARD_MAP: List[Tuple[str, Tuple[str, ...]]] = (
     ("CPO/光模块", ("CPO", "光模块", "光通信", "硅光", "中际旭创", "共封装")),
     ("国产服务器", ("服务器", "算力", "浪潮", "紫光")),
     ("培育钻石/金刚石散热", ("培育钻石", "金刚石", "热沉", "金刚石散热")),
+    ("电池/锂电", ("电池", "锂电池", "动力电池", "储能", "固态电池", "锂电")),
     ("半导体", ("芯片", "半导体", "先进封装", "HBM", "存储")),
     # 电子布须在「算力→国产服务器」之前列出，避免只贴服务器、漏掉玻纤主链
     ("玻纤/电子布", (
@@ -127,6 +130,14 @@ _BOARD_MAP: List[Tuple[str, Tuple[str, ...]]] = (
     ("人形机器人", ("机器人", "具身")),
     ("短剧/AIGC", ("短剧", "AIGC", "AI语料")),
     ("AI应用软件", ("办公软件", "金山", "大模型应用")),
+    ("网络安全", (
+        "网络安全", "信息安全", "网安", "等保", "零信任", "攻防演练",
+        "AI安全", "安全机制", "前沿AI", "奇安信", "深信服", "安恒", "天融信",
+    )),
+    ("数据安全", (
+        "数据安全", "数据加密", "密评", "商密", "数字证书", "电子认证",
+        "隐私计算", "中孚信息", "格尔软件", "电科网安",
+    )),
     ("黄金/贵金属", ("黄金", "白银", "金价", "贵金属", "期金")),
     ("创新药/CXO", ("创新药", "CXO", "医保", "凯莱英", "药明", "ADC", "GLP")),
     ("光伏", ("光伏", "硅料", "组件", "逆变器")),
@@ -147,6 +158,7 @@ _BOARD_THEME_IDS: Dict[str, Tuple[str, ...]] = {
     "CPO/光模块": ("cpo_optical", "fiber_cable"),
     "国产服务器": ("domestic_server",),
     "培育钻石/金刚石散热": ("lab_diamond",),
+    "电池/锂电": ("battery_li",),
     "半导体": ("memory_storage", "semi_materials", "semi_equipment"),
     "玻纤/电子布": ("glass_fiber", "pcb_ccl"),
     "PCB/覆铜板": ("pcb_ccl", "glass_fiber"),
@@ -154,6 +166,8 @@ _BOARD_THEME_IDS: Dict[str, Tuple[str, ...]] = {
     "人形机器人": ("humanoid_robot",),
     "短剧/AIGC": ("short_drama_aigc",),
     "AI应用软件": ("ai_app_soft",),
+    "网络安全": ("cyber_security",),
+    "数据安全": ("data_security",),
     "黄金/贵金属": ("precious_metals",),
     "创新药/CXO": ("innovative_drug",),
     "光伏": ("pv_solar",),
@@ -162,7 +176,7 @@ _BOARD_THEME_IDS: Dict[str, Tuple[str, ...]] = {
     "军工/国防": ("defense_military",),
     "商业航天": ("aerospace",),
     "农业/种植": ("agriculture",),
-    "美股科技/算力链": ("liquid_cooling", "cpo_optical", "domestic_server"),
+    "美股科技/算力链": ("cpo_optical", "domestic_server"),
 }
 
 _STANCE_SCORE = {
@@ -205,6 +219,10 @@ _HARD_BEAR = (
     "创历史新低",
     "阶段新低",
     "新低",
+    "资本开支削减",
+    "削减资本开支",
+    "AI放缓",
+    "增速放缓",
 )
 
 # 硬利好：无硬利空并存时，可直接偏多
@@ -263,6 +281,8 @@ _BEAR = (
     "澄清",
     "尚未形成",
     "无订单",
+    "目前未涉及",
+    "暂未涉及",
     "终止",
     "推迟",
     "裁员",
@@ -274,6 +294,9 @@ _BEAR = (
     "新低",
     "预亏",
     "爆雷",
+    "资本开支削减",
+    "削减资本开支",
+    "AI放缓",
 )
 _NOISE = (
     "官方售价",
@@ -285,6 +308,7 @@ _NOISE = (
 )
 
 # 硬叙事：应提前看见的催化（打分加权；与事后涨跌战报对立）
+# 注意：裸「电子布/玻纤」不进此表——须配涨价才算硬叙事，否则澄清蹭词会冲榜
 _HARD_NARRATIVE = (
     "英伟达",
     "NVIDIA",
@@ -320,9 +344,6 @@ _HARD_NARRATIVE = (
     "涨价",
     "提价",
     "缺货",
-    "电子布",
-    "电子纱",
-    "玻纤",
     "氢氟酸",
     "六氟磷酸锂",
     "国常会",
@@ -331,6 +352,13 @@ _HARD_NARRATIVE = (
     "扩产",
     "获批上市",
     "新药获批",
+    "OpenAI",
+    "Anthropic",
+    "Amodei",
+    "Altman",
+    "资本开支",
+    "CAPEX",
+    "AI放缓",
 )
 
 # 低信息量公司日历/资本运作：不是硬叙事（由 _is_digest_fluff 组合判断）
@@ -349,21 +377,60 @@ _DIGEST_FLUFF_BOARD_CHASE = (
     "三连板",
     "严重异常波动",
     "停牌核查",
+    "股票交易异常波动",
 )
 
 _HARD_NARRATIVE_RE = re.compile(
     r"("
     r"现货黄金.{0,12}突破"
     r"|金价.{0,8}(突破|大涨|创)"
-    r"|英伟达.{0,20}(财报|大会|量产|指引|Rubin)"
-    r"|NVIDIA.{0,20}(earnings|guidance|Rubin)"
+    r"|英伟达.{0,28}(财报|季报|大会|量产|指引|Rubin|营收|业绩)"
+    r"|NVIDIA.{0,28}(earnings|guidance|Rubin|revenue|beat|miss)"
+    r"|英偉達.{0,28}(財報|指引|營收)"
     r"|厄尔尼诺|拉尼娜"
     r"|(导弹|空袭|袭击).{0,16}(油轮|基地|港口|霍尔木兹)"
     r"|(染料|稀土|锂|铜|铝|钢材|硅料|玉米|大豆|小麦|电子布|电子纱|玻纤|氢氟酸|六氟|覆铜板).{0,40}(涨价|提价|上调|上涨)"
     r"|价格加速上涨"
     r"|(上调|上调了).{0,20}(电子布|电子纱|玻纤|氢氟酸|六氟).{0,12}(价格|报价)"
     r"|(电子布|电子纱|玻纤).{0,16}(价格|报价).{0,12}(上调|上涨|涨价)"
+    # AI 景气/资本开支：盘前叙事，须在涨完前看见
+    r"|AI.{0,16}(放缓|减速|降温|资本开支|CAPEX)"
+    r"|(人工智能|大模型|前沿模型|前沿AI).{0,16}(放缓|减速|降温)"
+    r"|(资本开支|CAPEX).{0,16}(放缓|削减|下降|放慢|放缓|砍|收缩)"
+    r"|(Amodei|Altman|Anthropic|OpenAI|Musk|马斯克).{0,40}(slow|放缓|警告|warn|CAPEX|资本开支|安全机制)"
     r")"
+)
+
+# 澄清蹭热：个股否认产品/业务——不是产业新闻，进池一律丢掉
+_PRODUCT_DENIAL_RE = re.compile(
+    r"("
+    r"(暂没有|暂时没有|目前没有|尚无|未有|没有).{0,16}(电子布|电子纱|玻纤|玻璃基板|产品|业务)"
+    r"|(未涉及|目前未涉及|暂未涉及|不涉及).{0,24}(玻璃基板|电子布|电子纱|玻纤|业务|产品|概念)"
+    r"|澄清.{0,36}(未涉及|没有|暂没有|不涉及)"
+    r"|互动(平台|易|表示).{0,40}(暂没有|没有|未涉及|不涉及)"
+    r")"
+)
+
+# AI 资本开支/前沿研发放缓：盘前叙事（勿把「AI漫剧估值泡沫」算进来）
+_AI_CAPEX_NARRATIVE_RE = re.compile(
+    r"("
+    r"AI.{0,16}(放缓|减速|降温|资本开支|CAPEX)"
+    r"|(人工智能|大模型|前沿模型|前沿AI).{0,16}(放缓|减速|降温|暂停)"
+    r"|(资本开支|CAPEX).{0,16}(放缓|削减|下降|放慢|砍|收缩)"
+    r"|(Amodei|Altman|Anthropic|OpenAI).{0,40}(slow|放缓|警告|warn|CAPEX|资本开支|安全机制)"
+    r"|多位.{0,8}AI.{0,16}(放缓|呼吁)"
+    r"|芯片股.{0,12}(承压|受压|回调)"
+    r")"
+)
+
+# 娱乐/蹭AI炒作：不当作资本开支硬叙事
+_AI_HYPE_NOISE = (
+    "漫剧",
+    "短剧",
+    "AI漫剧",
+    "估值泡沫",
+    "龙版传媒",
+    "不到10万营收",
 )
 
 # 子串伪阳性：出现否定式时，不计对应利好词
@@ -374,6 +441,8 @@ _BULL_NEGATIONS = (
     ("上调", ("不及预期", "下调")),
     ("获批", ("未获批", "不予批准", "获批立项", "获批编制")),
     ("大涨", ("最大涨幅", "涨幅居", "涨幅靠")),
+    ("扩产", ("暂没有", "未涉及", "不涉及")),
+    ("量产", ("暂没有", "未涉及", "不涉及")),
 )
 
 
@@ -392,12 +461,41 @@ def _categorize(title: str) -> str:
 def _related_boards(title: str) -> List[str]:
     t = str(title or "")
     out: List[str] = []
+
+    def _add(board: str) -> None:
+        if board and board not in out and len(out) < 4:
+            out.append(board)
+
+    # AI 放缓优先占位：网安相对受益 + 算力承压（避免被其它关键词挤掉）
+    if _is_ai_capex_narrative(t):
+        _add("网络安全")
+        _add("美股科技/算力链")
+        _add("国产服务器")
+        if any(k in t for k in ("芯片", "光模块", "CPO", "英伟达", "NVIDIA")):
+            _add("半导体" if "芯片" in t else "CPO/光模块")
     for board, keys in _BOARD_MAP:
         if any(k in t for k in keys):
-            out.append(board)
+            _add(board)
         if len(out) >= 4:
             break
-    return out
+    return out[:4]
+
+
+def _is_product_denial(title: str) -> bool:
+    """个股澄清否认产品/业务：不是科技产业政策新闻。"""
+    return bool(_PRODUCT_DENIAL_RE.search(str(title or "")))
+
+
+def _is_ai_hype_noise(title: str) -> bool:
+    t = str(title or "")
+    return any(k in t for k in _AI_HYPE_NOISE)
+
+
+def _is_ai_capex_narrative(title: str) -> bool:
+    t = str(title or "")
+    if not t or _is_ai_hype_noise(t):
+        return False
+    return bool(_AI_CAPEX_NARRATIVE_RE.search(t))
 
 
 def _count_stance_hits(title: str) -> Tuple[int, int]:
@@ -418,9 +516,12 @@ def _count_stance_hits(title: str) -> Tuple[int, int]:
         if not negated:
             bull += 1
     bear = sum(1 for k in _BEAR if k in t)
+    if _is_product_denial(t):
+        bear += 2
+        bull = 0
     # 涨停单独出现且夹带风险/澄清/跌停 → 不计多，并加强空
     if "涨停" in t:
-        if any(k in t for k in ("跌停", "提示风险", "风险提示", "澄清", "立案", "亏损")):
+        if any(k in t for k in ("跌停", "提示风险", "风险提示", "澄清", "立案", "亏损")) or _is_product_denial(t):
             bear += 1
         else:
             # 纯涨停偏弱多，最多 +1，避免盘面词主导
@@ -431,6 +532,12 @@ def _count_stance_hits(title: str) -> Tuple[int, int]:
 def _stance(title: str) -> Tuple[str, str]:
     """客观多空：利好 / 利空 / 中性偏多 / 中性偏空 / 中性。"""
     t = str(title or "")
+    if _is_product_denial(t):
+        return "利空", "标题否认产品/业务（暂没有/未涉及），澄清蹭热不作利好"
+    if _is_ai_capex_narrative(t) and any(
+        k in t for k in ("放缓", "减速", "降温", "削减", "下降", "泡沫", "slow", "砍", "收缩", "承压")
+    ):
+        return "利空", "AI/资本开支景气放缓叙事，算力链偏空、网安相对受益叙事"
     hard_bear = [k for k in _HARD_BEAR if k in t]
     hard_bull = [k for k in _HARD_BULL if k in t]
     # 硬利空优先：跌停/立案/新低/无订单等绝不能标成利好
@@ -448,6 +555,8 @@ def _stance(title: str) -> Tuple[str, str]:
                 "终止收购",
                 "提示风险",
                 "风险提示",
+                "AI放缓",
+                "资本开支削减",
             )
         )
         if extreme or not hard_bull:
@@ -472,9 +581,12 @@ def _stance(title: str) -> Tuple[str, str]:
 
 
 def _is_hard_narrative(title: str) -> bool:
-    """英伟达财报、发明量产、厄尔尼诺/粮价、战争军工、金价等硬叙事。"""
+    """英伟达财报、AI资本开支、发明量产、粮价、战争、金价等硬叙事。"""
     t = str(title or "")
     if not t:
+        return False
+    # 个股业务澄清 / 娱乐蹭AI：不是硬叙事
+    if _is_product_denial(t) or _is_ai_hype_noise(t):
         return False
     try:
         from qbot.data.industry_screener import news_title_is_overseas_premarket_ref
@@ -484,6 +596,8 @@ def _is_hard_narrative(title: str) -> bool:
     except Exception:
         pass
     if _HARD_NARRATIVE_RE.search(t):
+        return True
+    if _is_ai_capex_narrative(t):
         return True
     hits = sum(1 for k in _HARD_NARRATIVE if k in t)
     return hits >= 2 or (
@@ -502,19 +616,26 @@ def _is_hard_narrative(title: str) -> bool:
                 "量产",
                 "涨价",
                 "提价",
-                "电子布",
-                "电子纱",
-                "玻纤",
                 "氢氟酸",
+                "OpenAI",
+                "Anthropic",
+                "Amodei",
+                "资本开支",
+                "CAPEX",
             )
         )
     )
 
 
 def _is_digest_fluff(title: str) -> bool:
-    """业绩说明会、解除质押、连板异动回应等：低信息量，不当大事。"""
+    """业绩说明会、解除质押、连板异动、业务澄清等：低信息量，不当大事。"""
     t = str(title or "")
     if not t:
+        return True
+    # 要的是科技/产业/经济/政策与公司重大发明；个股「没有XX业务」澄清不算
+    if _is_product_denial(t):
+        return True
+    if _is_ai_hype_noise(t) and not _is_ai_capex_narrative(t):
         return True
     if _is_hard_narrative(t):
         return False
@@ -526,12 +647,20 @@ def _is_digest_fluff(title: str) -> bool:
         return True
     if any(k in t for k in _DIGEST_FLUFF_BOARD_CHASE):
         if any(k in t for k in ("澄清", "风险提示", "提示风险", "立案")):
-            return False
+            # 澄清若只是否认业务，上面 product_denial 已滤；其余连板澄清仍降权丢掉
+            return True
         return True
     return False
 
 
-def _importance(title: str, source: str, boards: List[str], stance: str) -> float:
+def _importance(
+    title: str,
+    source: str,
+    boards: List[str],
+    stance: str,
+    *,
+    news_time: str = "",
+) -> float:
     t = str(title or "")
     score = 0.0
     if boards:
@@ -544,7 +673,20 @@ def _importance(title: str, source: str, boards: List[str], stance: str) -> floa
         score += 1.0
     if _is_hard_narrative(t):
         score += 3.5
-    elif any(k in t for k in ("英伟达", "戴尔", "Dell", "财报", "获批", "国常会", "涨价", "量产")):
+        # 当天硬叙事加分，避免涨完了才排到前面
+        day = str(news_time or "")[:10]
+        today = _today()
+        if day == today:
+            score += 2.5
+        elif day:
+            try:
+                d0 = datetime.strptime(today, "%Y-%m-%d").date()
+                d1 = datetime.strptime(day, "%Y-%m-%d").date()
+                if (d0 - d1).days == 1:
+                    score += 1.2
+            except ValueError:
+                pass
+    elif any(k in t for k in ("英伟达", "戴尔", "Dell", "财报", "获批", "国常会", "涨价", "量产", "OpenAI", "Anthropic")):
         score += 1.5
     if _is_digest_fluff(t):
         score -= 4.0
@@ -909,8 +1051,28 @@ def _stocks_for_board_summary(
         return 0.0
 
     soft_noise = ("互动平台", "互动表示", "投资者关系", "截至发稿")
+
+    def _pick_unique_headlines(cands: List[Tuple[str, float, str]], n: int) -> List[str]:
+        """同板内近义硬叙事只留一条，避免 Anthropic 放缓刷两条。"""
+        out: List[str] = []
+        saw_ai_capex = False
+        for title, _imp, _st in cands:
+            if _is_product_denial(title) or _is_ai_hype_noise(title):
+                continue
+            if _is_ai_capex_narrative(title):
+                if saw_ai_capex:
+                    continue
+                saw_ai_capex = True
+            if title and title not in out:
+                out.append(title[:120])
+            if len(out) >= n:
+                break
+        return out
+
     best: Dict[str, Dict[str, Any]] = {}
     for title, imp, st in rows:
+        if _is_product_denial(title) or _is_ai_hype_noise(title):
+            continue
         soft = any(k in title for k in soft_noise)
         for hit in _extract_title_mentions(title, keep_score=True):
             code = str(hit.get("代码") or "").zfill(6)[-6:]
@@ -947,13 +1109,22 @@ def _stocks_for_board_summary(
     picked = ranked[:limit]
     if picked:
         stocks = [{"代码": r["代码"], "名称": r["名称"]} for r in picked]
-        headlines: List[str] = []
-        seen_h = set()
-        for r in picked:
-            h = str(r.get("_title") or "").strip()
-            if h and h not in seen_h:
-                seen_h.add(h)
-                headlines.append(h)
+        headlines = _pick_unique_headlines(
+            [(str(r.get("_title") or ""), float(r.get("_score") or 0), prefer_stance) for r in picked],
+            limit,
+        )
+        # 点名稿不足时，用同向高分标题补齐（仍去重）
+        if len(headlines) < limit:
+            extra = sorted(
+                rows,
+                key=lambda x: (-(_stance_align_bonus(x[2]) + x[1]),),
+            )
+            more = _pick_unique_headlines(extra, limit)
+            for h in more:
+                if h not in headlines:
+                    headlines.append(h)
+                if len(headlines) >= limit:
+                    break
         return stocks, headlines
 
     # 无点名：中军 + 按重要分取新闻（同向优先）
@@ -968,6 +1139,8 @@ def _stocks_for_board_summary(
             for t, imp, st in rows_sorted
             if st not in ("利空", "中性偏空")
             and not any(k in t for k in ("跌停", "暴跌", "新低", "立案"))
+            and not _is_product_denial(t)
+            and not _is_ai_hype_noise(t)
         ]
         rows_sorted = aligned or rows_sorted
     if prefer_stance in ("利空", "中性偏空"):
@@ -975,9 +1148,11 @@ def _stocks_for_board_summary(
             (t, imp, st)
             for t, imp, st in rows_sorted
             if st not in ("利好", "中性偏多")
+            and not _is_product_denial(t)
+            and not _is_ai_hype_noise(t)
         ]
         rows_sorted = aligned or rows_sorted
-    headlines = [t[:120] for t, _imp, _st in rows_sorted[:limit]]
+    headlines = _pick_unique_headlines(rows_sorted, limit)
     return seeds, headlines
 
 
@@ -1000,11 +1175,18 @@ def _build_board_summary(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         boards = it.get("相关板块") or []
         if not boards:
             continue
-        stance = str(it.get("多空") or "中性")
-        w = float(_STANCE_SCORE.get(stance, 0.0))
+        base_stance = str(it.get("多空") or "中性")
         imp = float(it.get("重要分") or 1.0)
         title = str(it.get("标题") or "")
         for board in boards:
+            # 同一条 AI 放缓：算力链利空，网安相对受益偏多
+            stance = base_stance
+            if _is_ai_capex_narrative(title):
+                if board in ("网络安全", "数据安全"):
+                    stance = "利好"
+                elif board in ("国产服务器", "CPO/光模块", "美股科技/算力链", "半导体"):
+                    stance = "利空"
+            w = float(_STANCE_SCORE.get(stance, 0.0))
             b = buckets.setdefault(
                 board,
                 {
@@ -1076,14 +1258,19 @@ def _load_news_pool(*, days: int = DIGEST_DAYS, fast: bool = True) -> pd.DataFra
 
     frames: List[pd.DataFrame] = []
     try:
-        flash = fetch_cross_platform_theme_news(fast=fast)
+        # 加宽快讯条数：英伟达财报/AI叙事常落在全球频道中后段
+        flash = fetch_cross_platform_theme_news(
+            fast=fast,
+            cls_limit=60 if fast else 80,
+            ws_limit=80 if fast else 120,
+        )
         if flash:
             frames.append(pd.DataFrame(flash))
     except Exception:
         pass
     try:
         base = fetch_forward_news(
-            finance_limit=25, tech_limit=30, pharma_limit=15, fast=fast
+            finance_limit=30, tech_limit=40, pharma_limit=15, fast=fast
         )
         if base is not None and not base.empty:
             frames.append(base)
@@ -1129,17 +1316,27 @@ def build_daily_news_digest(
             continue
         boards = _related_boards(title)
         stance, why = _stance(title)
-        score = _importance(title, str(r.get("source") or ""), boards, stance)
-        # 无板块映射且非硬叙事：门槛抬高，避免杂讯占坑
-        if score < min_score and not boards:
+        news_time = str(r.get("time") or "")
+        score = _importance(
+            title,
+            str(r.get("source") or ""),
+            boards,
+            stance,
+            news_time=news_time,
+        )
+        hard = _is_hard_narrative(title)
+        # 硬叙事：门槛放宽，保证盘前能刷进池；业务澄清已在 fluff 丢掉
+        if hard:
+            pass
+        elif score < min_score and not boards:
             continue
-        if not boards and not _is_hard_narrative(title) and score < (min_score + 1.5):
+        elif not boards and score < (min_score + 1.5):
             continue
         cat = _categorize(title)
         # 宏观美股若已映射到算力链，仍可留在宏观栏（戴尔属于宏观美股触发）
         items.append(
             {
-                "时间": str(r.get("time") or "")[:16],
+                "时间": news_time[:16],
                 "来源": str(r.get("source") or ""),
                 "频道": str(r.get("channel") or ""),
                 "标题": title[:140],
@@ -1163,7 +1360,7 @@ def build_daily_news_digest(
         cat = str(it.get("分栏") or "其他")
         if cat not in by_cat:
             by_cat[cat] = []
-        # 每栏最多 12 条，避免刷屏
+        # 每栏最多 12 条，避免刷屏；硬叙事优先占坑（已按重要分排序）
         if len(by_cat[cat]) < 12:
             by_cat[cat].append(it)
 
@@ -1183,8 +1380,11 @@ def build_daily_news_digest(
             if by_cat.get(c)
         ],
         "note": (
-            f"默认近{days}天硬叙事新闻（优先当天）：财报/发明量产/粮价气候/战争军工/金价商品涨价/"
+            f"默认近{days}天硬叙事新闻（优先当天）：财报/AI资本开支景气/"
+            "发明量产/粮价气候/战争军工/金价商品涨价/"
             "电子布玻纤材料涨价，以及美股亚太盘前隔夜（费城半导体等，作A股开盘参考）；"
+            "只收科技/产业/经济/政策与公司重大发明；个股「暂没有/未涉及」业务澄清一律丢掉；"
+            "AI放缓叙事挂算力链+网络安全，同板近义稿去重；"
             "过滤A股事后个股冲高跌幅战报与境内ETF软广。"
             "上方为板块多空总结+相关新闻+强相关个股；多空为标题客观定性；不构成荐股承诺。"
         ),

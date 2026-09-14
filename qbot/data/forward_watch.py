@@ -19,6 +19,8 @@
 个股双星：主线星=贴合当前热主线；买点星=是否适合短做。
 买入方法：A热板浅回 / B主线微涨横盘 / C热板连涨 / D催化缓涨 / E止跌再起。
 买入候选：短线形态主线星≥2，否则≥3；买点星≥3。特变压舱不进短线池。
+候选=是硬门槛（银之杰/风华 2026-09）：无新闻/重大催化时，**相对高位**禁止给是（近高缩量缓涨尤禁）；
+低位蓄势（风华型）可以无个股新闻仍给是，不因缺催化一刀切否掉。缩量仍可抬排序分，但不能单独把近高票抬成是。
 算电-算必须拆池：国产服务器（紫光/浪潮/锐捷）≠ 海外组装（富联）≠ 液冷散热（英维克等）≠ 算力租赁/智算（协创等），勿混为一谈；
 协创是 token/算力租赁偏硬侧，禁止划进短剧/AIGC内容或AI应用软件。
 多元主题分散：贵金属/医药/电力/航天/军工/农业/光伏/小金属/AI应用/汽车/科技硬件等 1～2 月看好的都留；
@@ -76,7 +78,7 @@ LATEST_PATH = (
 )
 
 # 管道版本：缓存里可对照是否按新规则刷新
-PIPELINE_VERSION = "forward_v7_36_glass_fiber"
+PIPELINE_VERSION = "forward_v7_42_cyber_security"
 
 # 风险分用日K缓存：code:asof → bars（单次刷新内复用；不含 limit，避免 28/90 双重拉）
 _RISK_BARS_CACHE: Dict[str, List[Dict[str, Any]]] = {}
@@ -171,6 +173,21 @@ CONCEPT_TO_INDUSTRIES: Dict[str, List[str]] = {
     "玻璃纤维": ["玻璃玻纤"],
     "玻璃玻纤": ["玻璃玻纤"],
     "电子布": ["玻璃玻纤"],
+    "培育钻石": ["培育钻石"],
+    "人造钻石": ["培育钻石"],
+    "金刚石": ["培育钻石"],
+    "金刚石散热": ["培育钻石"],
+    "热沉": ["培育钻石"],
+    "电池": ["电池", "锂电池"],
+    "锂电池": ["锂电池", "电池"],
+    "动力电池": ["电池", "锂电池"],
+    "储能": ["电池", "锂电池"],
+    "固态电池": ["电池", "锂电池"],
+    "锂电": ["锂电池", "电池"],
+    "网络安全": ["软件开发", "IT服务Ⅱ"],
+    "信息安全": ["软件开发", "IT服务Ⅱ"],
+    "数据安全": ["软件开发", "IT服务Ⅱ"],
+    "网络安全概念": ["软件开发", "IT服务Ⅱ"],
     "白酒": ["白酒Ⅲ", "酿酒行业"],
     "汽车整车": ["汽车整车", "乘用车", "商用车"],
     "汽车": ["汽车整车", "乘用车", "商用车"],
@@ -1004,6 +1021,204 @@ THEME_HINTS: List[Dict[str, Any]] = [
         ),
     },
     {
+        "id": "lab_diamond",
+        "name": "培育钻石/金刚石",
+        "priority": 5,
+        "keywords": [
+            "培育钻石",
+            "人造钻石",
+            "金刚石",
+            "金刚石散热",
+            "热沉",
+            "CVD",
+            "HPHT",
+            "英诺激光",
+            "黄河旋风",
+            "力量钻石",
+            "四方达",
+        ],
+        "news_keys": [
+            "培育钻石",
+            "人造钻石",
+            "金刚石",
+            "金刚石散热",
+            "热沉",
+        ],
+        "board_keys": [
+            "培育钻石",
+        ],
+        "industries": [
+            "培育钻石",
+        ],
+        "seed_stocks": [
+            ("301021", "英诺激光"),
+            ("600172", "黄河旋风"),
+            ("301071", "力量钻石"),
+            ("300179", "四方达"),
+        ],
+        "thesis": (
+            "培育钻石/金刚石散热独立观察：珠宝消费+算力热沉旁支可轮动。"
+            "力量钻石/黄河旋风/四方达偏材料中军与弹性；英诺激光偏加工设备。"
+            "涨停不追，回踩/催化缓涨再谈。"
+        ),
+    },
+    {
+        "id": "battery_li",
+        "name": "电池/锂电",
+        "priority": 5,
+        "keywords": [
+            "电池",
+            "锂电池",
+            "动力电池",
+            "储能",
+            "固态电池",
+            "锂电",
+            "麒麟电池",
+            "宁德时代",
+            "国轩高科",
+            "亿纬锂能",
+        ],
+        "news_keys": [
+            "电池",
+            "锂电池",
+            "动力电池",
+            "储能",
+            "固态电池",
+            "锂电",
+        ],
+        "board_keys": [
+            "电池",
+            "锂电池",
+            "动力电池",
+            "储能",
+            "固态电池",
+        ],
+        "industries": [
+            "电池",
+            "锂电池",
+        ],
+        "seed_stocks": [
+            ("300750", "宁德时代"),
+            ("002074", "国轩高科"),
+            ("300014", "亿纬锂能"),
+            ("002126", "银轮股份"),
+        ],
+        "thesis": (
+            "动力电池/储能/固态电池独立观察，与光伏组件设备分池。"
+            "宁德偏中军，国轩/亿纬偏弹性；银轮偏热管理配套。"
+            "涨停不追，催化缓涨或回踩再谈短做。"
+        ),
+    },
+    {
+        "id": "cyber_security",
+        "name": "网络安全",
+        "priority": 5,
+        "keywords": [
+            "网络安全",
+            "信息安全",
+            "网安",
+            "等保",
+            "防火墙",
+            "零信任",
+            "攻防演练",
+            "漏洞",
+            "安全运营",
+            "SOC",
+            "奇安信",
+            "深信服",
+            "安恒",
+            "天融信",
+            "启明星辰",
+        ],
+        "news_keys": [
+            "网络安全",
+            "信息安全",
+            "网安",
+            "等保",
+            "零信任",
+            "攻防演练",
+            "AI安全",
+            "对齐",
+            "Agent攻击",
+        ],
+        "board_keys": [
+            "网络安全",
+            "信息安全",
+            "网络安全概念",
+        ],
+        "industries": [
+            "软件开发",
+            "IT服务Ⅱ",
+        ],
+        "seed_stocks": [
+            ("688561", "奇安信"),
+            ("300454", "深信服"),
+            ("688023", "安恒信息"),
+            ("002212", "天融信"),
+            ("002439", "启明星辰"),
+            ("688244", "永信至诚"),
+            ("300369", "绿盟科技"),
+            ("002912", "中新赛克"),
+        ],
+        "thesis": (
+            "网络安全正版：边界/云安全/攻防靶场；AI Agent扩大攻击面时预算优先。"
+            "奇安信/深信服偏中军，安恒/天融信/启明/绿盟偏弹性；永信至诚偏靶场，中新赛克偏流量分析。"
+            "连板/涨停日不追，催化缓涨或回踩再谈。"
+        ),
+    },
+    {
+        "id": "data_security",
+        "name": "数据安全",
+        "priority": 5,
+        "keywords": [
+            "数据安全",
+            "数据加密",
+            "数据防泄漏",
+            "DLP",
+            "隐私计算",
+            "密评",
+            "商密",
+            "数字证书",
+            "电子认证",
+            "密码",
+            "中孚信息",
+            "格尔软件",
+            "电科网安",
+        ],
+        "news_keys": [
+            "数据安全",
+            "数据加密",
+            "数据防泄漏",
+            "隐私计算",
+            "密评",
+            "商密",
+            "数字证书",
+            "电子认证",
+        ],
+        "board_keys": [
+            "数据安全",
+            "信息安全",
+        ],
+        "industries": [
+            "软件开发",
+            "IT服务Ⅱ",
+        ],
+        "seed_stocks": [
+            ("300659", "中孚信息"),
+            ("603232", "格尔软件"),
+            ("002268", "电科网安"),
+            ("300579", "数字认证"),
+            ("688201", "信安世纪"),
+            ("300188", "美亚柏科"),
+            ("688168", "安博通"),
+        ],
+        "thesis": (
+            "数据安全/商密/认证：合规与AI落地配套；与边界网安分池观察。"
+            "中孚/电科网安/格尔偏正版，数字认证/信安世纪偏证书与密码，美亚柏科偏取证。"
+            "涨停不追，回踩或催化缓涨再谈。"
+        ),
+    },
+    {
         "id": "microled_opt",
         "name": "MicroLED光通信",
         "priority": 2,
@@ -1090,14 +1305,13 @@ THEME_HINTS: List[Dict[str, Any]] = [
             ("002230", "科大讯飞"),
             ("300033", "同花顺"),
             ("300085", "银之杰"),
-            ("300454", "深信服"),
             ("300496", "中科创达"),
             ("300624", "万兴科技"),
         ],
         "thesis": (
             "硬件拥挤后资金常切向兑现型AI应用/金融IT/办公软件；"
             "主升看连续资金与回踩买点，周五冲高回落时先辨真强假强，勿追分时尖峰。"
-            "四维图新已拉黑，不进种子、不日推。"
+            "深信服已划入网络安全主题；四维图新已拉黑，不进种子、不日推。"
         ),
     },
     {
@@ -5286,6 +5500,8 @@ _STRUCTURE_KEEP_HINT_IDS = frozenset(
         "memory_storage",
         # 科技应用/独立景气（与硬件分池，同等保位）
         "ai_app_soft",
+        "cyber_security",
+        "data_security",
         "short_drama_aigc",
         "humanoid_robot",
         "fiber_cable",
@@ -5305,6 +5521,8 @@ _STRUCTURE_KEEP_HINT_IDS = frozenset(
         "auto_oem",
         "pv_solar",
         "glass_fiber",
+        "lab_diamond",
+        "battery_li",
         "minor_metals",
     }
 )
@@ -5345,12 +5563,16 @@ _DIG_WAIT_HINT_IDS = frozenset(
         "base_chem",
         "pv_solar",
         "glass_fiber",
+        "lab_diamond",
+        "battery_li",
         "minor_metals",
     }
 )
 
 # 用户点名强保：主题未热时仍强制保位注入（hint_id 必须在 THEME_HINTS）
-_USER_PIN_HINT_IDS = frozenset({"mlcc"})
+_USER_PIN_HINT_IDS = frozenset(
+    {"mlcc", "lab_diamond", "battery_li", "cyber_security", "data_security"}
+)
 
 _HOMOGENEOUS_STOCK_CAP = 3
 _DEFAULT_STOCK_CAP = 8
@@ -6594,6 +6816,54 @@ _DAILY_SHORT_BOARD_SEEDS: Dict[str, List[Tuple[str, str]]] = {
         ("600176", "中国巨石"),
         ("603256", "宏和科技"),
     ],
+    "培育钻石": [
+        ("301021", "英诺激光"),
+        ("600172", "黄河旋风"),
+        ("301071", "力量钻石"),
+        ("300179", "四方达"),
+    ],
+    "电池": [
+        ("300750", "宁德时代"),
+        ("002074", "国轩高科"),
+        ("300014", "亿纬锂能"),
+        ("002126", "银轮股份"),
+    ],
+    "锂电池": [
+        ("300750", "宁德时代"),
+        ("002074", "国轩高科"),
+        ("300014", "亿纬锂能"),
+        ("002126", "银轮股份"),
+    ],
+    "固态电池": [
+        ("300750", "宁德时代"),
+        ("002074", "国轩高科"),
+        ("300014", "亿纬锂能"),
+    ],
+    "网络安全": [
+        ("688561", "奇安信"),
+        ("300454", "深信服"),
+        ("688023", "安恒信息"),
+        ("002212", "天融信"),
+        ("002439", "启明星辰"),
+        ("688244", "永信至诚"),
+        ("300369", "绿盟科技"),
+        ("002912", "中新赛克"),
+    ],
+    "信息安全": [
+        ("688561", "奇安信"),
+        ("300454", "深信服"),
+        ("688023", "安恒信息"),
+        ("002212", "天融信"),
+        ("002439", "启明星辰"),
+    ],
+    "数据安全": [
+        ("300659", "中孚信息"),
+        ("603232", "格尔软件"),
+        ("002268", "电科网安"),
+        ("300579", "数字认证"),
+        ("688201", "信安世纪"),
+        ("300188", "美亚柏科"),
+    ],
     "小金属": [
         ("002428", "云南锗业"),
         ("600549", "厦门钨业"),
@@ -6670,6 +6940,16 @@ _DAILY_SHORT_NEWS_SEEDS: List[Tuple[Tuple[str, ...], str, List[Tuple[str, str]]]
         ],
     ),
     (
+        ("培育钻石", "人造钻石", "金刚石", "金刚石散热", "热沉"),
+        "培育钻石",
+        [
+            ("301021", "英诺激光"),
+            ("600172", "黄河旋风"),
+            ("301071", "力量钻石"),
+            ("300179", "四方达"),
+        ],
+    ),
+    (
         ("电池", "麒麟电池", "储能", "固态电池", "动力电池"),
         "电池",
         [
@@ -6677,6 +6957,31 @@ _DAILY_SHORT_NEWS_SEEDS: List[Tuple[Tuple[str, ...], str, List[Tuple[str, str]]]
             ("300750", "宁德时代"),
             ("002074", "国轩高科"),
             ("300014", "亿纬锂能"),
+        ],
+    ),
+    (
+        ("网络安全", "信息安全", "网安", "等保", "零信任", "AI安全"),
+        "网络安全",
+        [
+            ("688561", "奇安信"),
+            ("300454", "深信服"),
+            ("688023", "安恒信息"),
+            ("002212", "天融信"),
+            ("002439", "启明星辰"),
+            ("688244", "永信至诚"),
+            ("002912", "中新赛克"),
+        ],
+    ),
+    (
+        ("数据安全", "数据加密", "密评", "商密", "数字证书", "电子认证", "隐私计算"),
+        "数据安全",
+        [
+            ("300659", "中孚信息"),
+            ("603232", "格尔软件"),
+            ("002268", "电科网安"),
+            ("300579", "数字认证"),
+            ("688201", "信安世纪"),
+            ("300188", "美亚柏科"),
         ],
     ),
     (
@@ -7281,19 +7586,24 @@ def _prefetch_risk_bars(
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
         list(pool.map(_one, todo, chunksize=max(1, (len(todo) + workers - 1) // workers)))
-    # 第二遍：仅本地因子库补洞（16:05 存库已负责网拉）；禁止串行慢网拖死刷新
+    # 第二遍：本地因子库补洞；再不行写空占坑，避免评分阶段对同一票串行重打网
     miss = [c for c in todo if not _RISK_BARS_CACHE.get(f"{c}:{end}")]
 
     def _fill_store(code: str) -> None:
+        key = f"{code}:{end}"
         out = _bars_from_ml_store(code, end, int(fetch_n))
-        if out:
-            _RISK_BARS_CACHE[f"{code}:{end}"] = out
+        _RISK_BARS_CACHE[key] = list(out or [])
 
     if miss:
         sw = min(workers, max(4, len(miss)))
         with ThreadPoolExecutor(max_workers=sw) as pool:
             list(pool.map(_fill_store, miss, chunksize=max(1, (len(miss) + sw - 1) // sw)))
-    return len(todo)
+    # 仍无键的（预拉未写空）：统一占坑
+    for code in todo:
+        key = f"{code}:{end}"
+        if key not in _RISK_BARS_CACHE:
+            _RISK_BARS_CACHE[key] = []
+    return sum(1 for c in todo if _RISK_BARS_CACHE.get(f"{c}:{end}"))
 
 
 def _asof_yyyymmdd(asof: str) -> str:
@@ -7333,17 +7643,17 @@ def _get_risk_bars(
     fetch_n = max(need, _RISK_BARS_FETCH_LIMIT)
     key = f"{code}:{end}"
     if key in _RISK_BARS_CACHE:
+        # 本刷新已预拉/占坑：有数用数，空也直接返回，禁止评分阶段对失败票串行重打
         cached = _RISK_BARS_CACHE[key]
-        # 有数据：直接复用；空缓存：允许再拉（预拉失败不能锁死整晚）
-        if cached:
-            return cached[-need:] if len(cached) > need else list(cached)
-        if not allow_slow_fallback:
-            return []
+        return cached[-need:] if len(cached) > need else list(cached)
 
     bars: List[Dict[str, Any]] = []
     try:
         if fast_fetch:
             bars = _fetch_kline_bars_fast(code, end, limit=int(fetch_n)) or []
+            # 东财 push2his 常断连、delay 常空 klines；once 含腾讯/新浪兜底，仍是单次无 3 次 sleep
+            if not bars:
+                bars = _fetch_kline_bars_once(code, end, limit=int(fetch_n)) or []
         else:
             bars = _fetch_kline_bars_once(code, end, limit=int(fetch_n)) or []
     except Exception:
@@ -7358,9 +7668,8 @@ def _get_risk_bars(
         out = [b for b in bars if str(b.get("date") or "")[:8] <= end]
     if not out:
         out = _bars_from_ml_store(code, end, int(fetch_n))
-    # 只缓存成功结果；空的不写，避免并行预拉失败后全体 heuristic
-    if out:
-        _RISK_BARS_CACHE[key] = out
+    # 成功/失败都写入，避免同刷新内重复打点
+    _RISK_BARS_CACHE[key] = list(out or [])
     return out[-need:] if len(out) > need else list(out)
 
 
@@ -7662,14 +7971,19 @@ def _score_buy_risk(
             score += pen
             parts.append(f"窗内回撤{float(max_dd):.0f}% {pen:+.0f}")
     if pct_from_high is not None:
-        # 贴着高点还冲：拥挤；离开高点 2～6% 且未崩：消化加分
+        # 贴着高点还冲：拥挤；近高缩量无催化=假消化（银之杰）；深回踩或有催化才算消化
         pfh = float(pct_from_high)
+        has_news = bool(news_hits)
         if pfh >= -1.0 and pct_v is not None and pct_v >= 2.0:
             score -= 8.0
             parts.append("贴近高点仍冲 -8")
         elif -6.0 <= pfh <= -1.5 and pct5_v is not None and pct5_v >= 8.0:
-            score += 8.0
-            parts.append(f"距高点{pfh:.1f}%消化 +8")
+            if has_news:
+                score += 4.0
+                parts.append(f"距高点{pfh:.1f}%有催化消化 +4")
+            else:
+                score -= 8.0
+                parts.append(f"近高无催化假消化{pfh:.1f}% -8")
         elif pfh <= -15.0 and pct5_v is not None and pct5_v < -5.0 and (
             pct_v is None or pct_v < 0.5
         ):
@@ -7690,9 +8004,19 @@ def _score_buy_risk(
         and hard_shrink
         and (pct_from_high is None or float(pct_from_high) <= -1.0)
     ):
-        # 无资金字段时：缩量微涨离开高点，仍给一截结构分（光迅12号型）
-        score += 12.0
-        parts.append("缩量微涨离高点 +12")
+        pfh2 = float(pct_from_high) if pct_from_high is not None else -99.0
+        has_news = bool(news_hits)
+        if pfh2 <= -8.0:
+            # 已明显离开高点的缩量微涨：真低位蓄力
+            score += 12.0
+            parts.append("缩量微涨离高点 +12")
+        elif has_news and pfh2 <= -3.0:
+            score += 6.0
+            parts.append("有催化缩量微涨 +6")
+        else:
+            # 近高无催化缩量：排序可留观察，但风险分要降（银之杰）
+            score -= 6.0
+            parts.append("近高无催化缩量 -6")
     elif mild >= 3:
         pen = min(28.0, 6.0 * (mild - 2))
         score -= pen
@@ -7959,7 +8283,7 @@ def _score_buy_risk_for_code(
 ) -> Dict[str, Any]:
     """拉取日K阳线/CFA度量后打风险分。"""
     ctx = _build_risk_context(code, asof, history=history, today_pct=pct)
-    return _score_buy_risk(
+    out = _score_buy_risk(
         pct=pct,
         pct5=pct5,
         flow=flow,
@@ -7979,6 +8303,47 @@ def _score_buy_risk_for_code(
         news_hits=news_hits,
         theme_grade=theme_grade,
     )
+    out["pct_from_high"] = ctx.get("pct_from_high")
+    return out
+
+
+def _allow_buy_candidate_catalyst(
+    *,
+    news_n: int,
+    major_catalyst: bool,
+    board_pct: Optional[float],
+    theme_grade: str,
+    kind: str,
+    bar_struct: Optional[Dict[str, Any]] = None,
+    pct_from_high: Optional[float] = None,
+    pct5: Optional[float] = None,
+) -> Tuple[bool, str]:
+    """
+    催化门控（银之杰 vs 风华）：
+    - 有新闻/重大催化 → 本门不拦（仍受形态/星级/风险值等约束）
+    - 无催化 + 相对高位 → 否（银之杰：近高缩量缓涨不能给是）
+    - 无催化 + 非相对高位 → 放行（风华：低位蓄势可以没个股新闻）
+    本函数只否「近高无催化」；不负责把所有低位票抬成是。
+    """
+    has_cat = bool(major_catalyst) or int(news_n or 0) >= 1
+
+    # 相对高位：距窗内高点浅，或 5 日已大涨且回撤不深
+    rel_high = False
+    if pct_from_high is not None and float(pct_from_high) >= -5.0:
+        rel_high = True
+    if pct5 is not None and float(pct5) >= 12.0 and (
+        pct_from_high is None or float(pct_from_high) >= -8.0
+    ):
+        rel_high = True
+
+    if has_cat:
+        return True, ""
+
+    if rel_high:
+        return False, "无催化且相对高位，候选否（银之杰型）"
+
+    # 低位无个股新闻：不因缺催化否决（风华型）；是否给是仍看买点/主题/风险
+    return True, ""
 
 
 def build_daily_short_picks(
@@ -8000,7 +8365,7 @@ def build_daily_short_picks(
     if boards is None:
         boards = pd.DataFrame()
 
-    _clear_risk_bars_cache()
+    # 不在此清空日K缓存：前瞻主流程已预拉，短池复用；单独跑短池时下面仍会预拉
     history = _load_history()
     asof = _forward_asof_date()
 
@@ -8255,6 +8620,10 @@ def build_daily_short_picks(
             continue
 
         kind = str(setup.get("kind") or "")
+        # 粗筛：无催化且 5 日已大涨≈相对高位 → 跳过；低位无新闻留给风华型，等 risk 用 pfh 终判
+        if int(nh or 0) <= 0 and not bool(major) and pct5 is not None and float(pct5) >= 12.0:
+            continue
+
         short_kinds = (
             "t1_catalyst_up",
             "t1_hot_continue",
@@ -8309,6 +8678,18 @@ def build_daily_short_picks(
             theme_grade=theme_grade,
         )
         risk_score = float(risk.get("风险值") or 0)
+        _gate_ok2, _gate_why2 = _allow_buy_candidate_catalyst(
+            news_n=int(nh or 0),
+            major_catalyst=bool(major),
+            board_pct=board_pct,
+            theme_grade=theme_grade,
+            kind=kind,
+            bar_struct=bar_ks,
+            pct_from_high=risk.get("pct_from_high"),
+            pct5=pct5,
+        )
+        if not _gate_ok2:
+            continue
         timing = _apply_forward_timing(
             code=code,
             asof=asof,
@@ -9108,6 +9489,28 @@ def build_forward_watch(
                 buy_ready = False
             if timing["veto_chase"] and timing.get("structure", {}).get("tag") == "rocket":
                 buy_ready = False
+            # 银之杰：无催化+相对高位不得给是；风华低位无新闻不因此否
+            _kind_for_gate = str(
+                (buy_setup if buy_setup.get("buy_ok") else method_setup).get("kind")
+                or method_setup.get("kind")
+                or buy_setup.get("kind")
+                or ""
+            )
+            _gate_ok, _gate_why = _allow_buy_candidate_catalyst(
+                news_n=len(news_hits or []),
+                major_catalyst=bool(major_cat),
+                board_pct=board_pct,
+                theme_grade=theme_grade,
+                kind=_kind_for_gate,
+                bar_struct=bar_ks,
+                pct_from_high=risk.get("pct_from_high"),
+                pct5=pct5,
+            )
+            if buy_ready and not _gate_ok:
+                buy_ready = False
+                buy_action_gate_note = _gate_why
+            else:
+                buy_action_gate_note = ""
 
             buy_range, buy_action = _suggest_buy_plan(
                 px,
@@ -9249,6 +9652,8 @@ def build_forward_watch(
                 )
             if buy_setup.get("kline"):
                 evidence.append(f"【今日K线】{buy_setup.get('kline')}")
+            if buy_action_gate_note:
+                evidence.append(f"【催化门槛】{buy_action_gate_note}")
             if buy_method:
                 evidence.append(
                     f"【买入方法】{buy_method}（候选=是才给；贴价可成交，多方法任一即可）"

@@ -650,13 +650,37 @@ def news_title_is_market_noise(title: str) -> bool:
 
 
 def news_title_is_industry_catalyst(title: str) -> bool:
-    """英伟达CPO量产、光模块等产业催化。"""
+    """英伟达CPO量产、光模块、AI资本开支等产业催化。"""
     t = str(title or "")
     if not t:
         return False
     tech_giant = any(k in t for k in ("英伟达", "NVIDIA", "英偉達", "辉达", "輝達"))
     if tech_giant and any(
-        k in t for k in ("CPO", "光模块", "光通訊", "光通信", "量产", "量產", "硅光")
+        k in t
+        for k in (
+            "CPO",
+            "光模块",
+            "光通訊",
+            "光通信",
+            "量产",
+            "量產",
+            "硅光",
+            "财报",
+            "季报",
+            "指引",
+            "营收",
+            "earnings",
+            "guidance",
+        )
+    ):
+        return True
+    # AI 景气/资本开支叙事：须在涨完前进入前瞻池
+    if any(k in t for k in ("OpenAI", "Anthropic", "Amodei", "Altman")) and any(
+        k in t for k in ("放缓", "slow", "警告", "warn", "资本开支", "CAPEX", "泡沫", "bubble")
+    ):
+        return True
+    if ("资本开支" in t or "CAPEX" in t) and any(
+        k in t for k in ("放缓", "削减", "下降", "砍", "收缩", "AI", "人工智能", "大模型")
     ):
         return True
     if "量产" in t or "量產" in t:
@@ -850,6 +874,7 @@ def fetch_forward_news(
         "医药", "创新药", "医保", "药企", "生物药", "CXO", "中药", "疫苗",
         # 材料涨价：电子布/玻纤/氟化工常走产业稿，须放行
         "电子布", "电子纱", "玻纤", "涨价", "提价", "氢氟酸", "六氟", "覆铜板",
+        "OpenAI", "Anthropic", "Amodei", "Altman", "资本开支", "CAPEX",
     )
     _TECH_KEEP = (
         "芯片", "半导体", "光模块", "CPO", "光通信", "硅光", "英伟达", "NVIDIA",
@@ -858,6 +883,8 @@ def fetch_forward_news(
         "通信", "5G", "6G", "PCB", "消费电子", "苹果", "华为", "汽车电子",
         "软件", "信创", "数据中心", "交换机", "光芯片", "共封装",
         "电子布", "电子纱", "玻纤", "玻璃纤维", "覆铜板",
+        "OpenAI", "Anthropic", "Amodei", "Altman", "资本开支", "CAPEX",
+        "网络安全", "信息安全", "数据安全",
     )
     _PHARMA_KEEP = (
         "医药", "创新药", "医保", "药企", "制药", "生物药", "生物医药",
@@ -1741,6 +1768,21 @@ def _fetch_kline_bars_tencent(code: str, end_yyyymmdd: str, limit: int = 8) -> l
     return bars
 
 
+def _kline_beg_yyyymmdd(end_yyyymmdd: str, limit: int) -> str:
+    """东财 beg=0 会回吐全部历史（数千根），行业扫描会被拖死。按日历回推。"""
+    from datetime import datetime, timedelta
+
+    end = str(end_yyyymmdd or "").replace("-", "")[:8]
+    if len(end) != 8:
+        return "20200101"
+    try:
+        dt = datetime.strptime(end, "%Y%m%d")
+    except ValueError:
+        return "20200101"
+    days = max(int(limit or 8) * 3, 45)
+    return (dt - timedelta(days=days)).strftime("%Y%m%d")
+
+
 def _fetch_kline_bars_fast(code: str, end_yyyymmdd: str, limit: int = 28) -> list:
     """前瞻风险预拉：短超时、不兜底腾讯/新浪，避免单票拖死整批。"""
     code = str(code or "").zfill(6)
@@ -1755,8 +1797,11 @@ def _fetch_kline_bars_fast(code: str, end_yyyymmdd: str, limit: int = 28) -> lis
         "secid": _stock_secid(code),
         "fields1": "f1,f2,f3,f4,f5,f6",
         "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+        # 必须带 ut + 显式 beg；禁止 beg=0（会拉全历史把板块刷新拖死）
+        "ut": "fa5fd1943c7b386f172d6893dbfba10b",
         "klt": "101",
         "fqt": "1",
+        "beg": _kline_beg_yyyymmdd(end_yyyymmdd, limit),
         "end": end_yyyymmdd,
         "lmt": str(limit),
     }
@@ -1788,7 +1833,8 @@ def _fetch_kline_bars_fast(code: str, end_yyyymmdd: str, limit: int = 28) -> lis
                 except (TypeError, ValueError, IndexError):
                     continue
             if bars:
-                return bars
+                # lmt 时接口偶发回超长历史，只取末 limit 根
+                return bars[-int(limit or 28) :]
         except Exception:
             continue
     return []
@@ -1809,8 +1855,10 @@ def _fetch_kline_bars_once(code: str, end_yyyymmdd: str, limit: int = 8) -> list
         "secid": _stock_secid(code),
         "fields1": "f1,f2,f3,f4,f5,f6",
         "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+        "ut": "fa5fd1943c7b386f172d6893dbfba10b",
         "klt": "101",
         "fqt": "1",
+        "beg": _kline_beg_yyyymmdd(end_yyyymmdd, limit),
         "end": end_yyyymmdd,
         "lmt": str(limit),
     }
@@ -1850,7 +1898,7 @@ def _fetch_kline_bars_once(code: str, end_yyyymmdd: str, limit: int = 8) -> list
         except (TypeError, ValueError, IndexError):
             continue
     if bars:
-        return bars
+        return bars[-int(limit or 8) :]
     bars = _fetch_kline_bars_tencent(code, end_yyyymmdd, limit=limit)
     if bars:
         return bars
