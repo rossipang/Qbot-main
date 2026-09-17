@@ -19,8 +19,11 @@
 个股双星：主线星=贴合当前热主线；买点星=是否适合短做。
 买入方法：A热板浅回 / B主线微涨横盘 / C热板连涨 / D催化缓涨 / E止跌再起。
 买入候选：短线形态主线星≥2，否则≥3；买点星≥3。特变压舱不进短线池。
-候选=是硬门槛（银之杰/风华 2026-09）：无新闻/重大催化时，**相对高位**禁止给是（近高缩量缓涨尤禁）；
-低位蓄势（风华型）可以无个股新闻仍给是，不因缺催化一刀切否掉。缩量仍可抬排序分，但不能单独把近高票抬成是。
+候选=是硬门槛（银之杰/风华 2026-09 + 新闻五档 2026-09-15）：
+新闻分五档（重大利好/普通利好/不相关/普通利空/重大利空），优先大模型判定、硬词兜底；
+**只有利好档才算催化**；利空标题不得当作 has_cat 放行；重大利空硬否候选；
+普通利空否决 E 止跌类 buy_ok（防宁德式叙事中继飞刀）。
+无利好催化 + 相对高位 → 禁止给是（银之杰）；低位蓄势（风华型）可以无利好新闻仍给是。
 算电-算必须拆池：国产服务器（紫光/浪潮/锐捷）≠ 海外组装（富联）≠ 液冷散热（英维克等）≠ 算力租赁/智算（协创等），勿混为一谈；
 协创是 token/算力租赁偏硬侧，禁止划进短剧/AIGC内容或AI应用软件。
 多元主题分散：贵金属/医药/电力/航天/军工/农业/光伏/小金属/AI应用/汽车/科技硬件等 1～2 月看好的都留；
@@ -52,6 +55,16 @@ from qbot.data.industry_screener import (
     news_title_is_major_catalyst,
     set_board_fetch_fast,
 )
+from qbot.data.news_stance import (
+    TIER_MAJOR_BEAR,
+    TIER_MAJOR_BULL,
+    TIER_SCORE,
+    aggregate_stances,
+    classify_title_keyword,
+    classify_titles,
+    filter_bullish_titles,
+    risk_delta_from_aggregate,
+)
 from qbot.data.forward_timing import (
     apply_timing_to_risk,
     enrich_buy_setup_with_structure,
@@ -78,7 +91,7 @@ LATEST_PATH = (
 )
 
 # 管道版本：缓存里可对照是否按新规则刷新
-PIPELINE_VERSION = "forward_v7_47_mat_seeds"
+PIPELINE_VERSION = "forward_v7_48_news_stance5"
 
 # 风险分用日K缓存：code:asof → bars（单次刷新内复用；不含 limit，避免 28/90 双重拉）
 _RISK_BARS_CACHE: Dict[str, List[Dict[str, Any]]] = {}
@@ -3141,7 +3154,7 @@ def _news_hits_for_keys(keys: List[str], news_df: pd.DataFrame) -> List[str]:
     if news_df is None or news_df.empty or not keys:
         return hits
     clean = [str(k).strip() for k in keys if str(k).strip()]
-    # 重大政策稿优先收集，再补普通命中；过滤市值排名等弱新闻
+    # 重大利好优先；利空标题直接丢弃（禁止当催化进主题质量）
     majors: List[str] = []
     normals: List[str] = []
     for _, r in news_df.iterrows():
@@ -3151,7 +3164,17 @@ def _news_hits_for_keys(keys: List[str], news_df: pd.DataFrame) -> List[str]:
         low = title.lower()
         if not any(k.lower() in low or k in title for k in clean):
             continue
-        (majors if news_title_is_major_catalyst(title) else normals).append(title[:80])
+        kw = classify_title_keyword(title)
+        tier = str(kw.get("tier") or "")
+        score = float(TIER_SCORE.get(tier, 0.0) or 0.0)
+        if score < 0:
+            continue  # 利空不算「有新闻」
+        if score <= 0:
+            continue  # 不相关不进主题催化池
+        if tier == TIER_MAJOR_BULL or news_title_is_major_catalyst(title):
+            majors.append(title[:80])
+        else:
+            normals.append(title[:80])
         if len(majors) + len(normals) >= 8:
             break
     for title in majors + normals:
@@ -3163,10 +3186,16 @@ def _news_hits_for_keys(keys: List[str], news_df: pd.DataFrame) -> List[str]:
 
 
 def _major_catalyst_in_hits(news_hits: List[str]) -> bool:
-    return any(
-        news_title_is_major_catalyst(t) and not _is_weak_forward_news(t)
+    """仅「重大利好」算重大催化；利空/不相关标题一律不算。"""
+    clean = [
+        str(t)
         for t in (news_hits or [])
-    )
+        if str(t or "").strip() and not _is_weak_forward_news(t)
+    ]
+    if not clean:
+        return False
+    packs = classify_titles(clean[:8], use_llm=True)
+    return any(str(p.get("tier") or "") == TIER_MAJOR_BULL for p in packs)
 
 
 def _board_quality_score(
@@ -7461,70 +7490,40 @@ def _soft_penalty(x: float, start: float, full: float, max_pen: float) -> float:
 
 def _news_risk_delta(news_hits: Optional[List[str]]) -> Tuple[float, List[str]]:
     """
-    新闻对买入风险分的轻量修正。
-    主题级新闻已体现在主题星/入池，个股风险值以价量/CFA为主；
-    此处仅接受「点名该股」的新闻，且总修正封顶，避免利好叠到 60+。
+    新闻对买入风险分的修正（五档多空）。
+    优先大模型档位；调用方应先滤到点名该股的标题。
     """
     why: List[str] = []
     if not news_hits:
         return 0.0, why
-    bull_major = bull_norm = bear_major = bear_norm = 0
-    bear_kw = (
-        "澄清",
-        "否认",
-        "减持",
-        "亏损",
-        "下滑",
-        "立案",
-        "处罚",
-        "问询",
-        "违约",
-        "爆雷",
-        "造假",
-        "退市",
-        "风险警示",
-        "业绩预减",
-        "预亏",
-    )
-    for t in news_hits[:6]:
-        title = str(t or "")
-        if _is_weak_forward_news(title):
-            continue
-        bearish = any(k in title for k in bear_kw)
-        major = news_title_is_major_catalyst(title)
-        if bearish:
-            if major or any(k in title for k in ("立案", "造假", "退市", "爆雷")):
-                bear_major += 1
-            else:
-                bear_norm += 1
-        else:
-            if major:
-                bull_major += 1
-            else:
-                bull_norm += 1
-    delta = 0.0
-    if bull_major:
-        add = min(8.0, 5.0 + 3.0 * (bull_major - 1))
-        delta += add
-        why.append(f"个股利好×{bull_major} +{add:.0f}")
-    if bull_norm:
-        add = min(4.0, 2.0 * bull_norm)
-        delta += add
-        why.append(f"一般利好×{bull_norm} +{add:.0f}")
-    if bear_norm:
-        sub = min(8.0, 3.0 * bear_norm)
-        delta -= sub
-        why.append(f"一般利空×{bear_norm} -{sub:.0f}")
-    if bear_major:
-        sub = min(18.0, 10.0 + 4.0 * (bear_major - 1))
-        delta -= sub
-        why.append(f"重大利空×{bear_major} -{sub:.0f}")
-    # 硬封顶：风险值不被新闻主导
-    if delta > 8.0:
-        delta = 8.0
-    if delta < -18.0:
-        delta = -18.0
-    return delta, why
+    titles = [str(t) for t in (news_hits or [])[:8] if str(t or "").strip()]
+    if not titles:
+        return 0.0, why
+    packs = classify_titles(titles, use_llm=True)
+    agg = aggregate_stances(packs)
+    return risk_delta_from_aggregate(agg)
+
+
+def _stance_aggregate_for_titles(
+    titles: Optional[List[str]],
+    *,
+    stock_hint: str = "",
+) -> Dict[str, Any]:
+    clean = [str(t) for t in (titles or []) if str(t or "").strip()]
+    if not clean:
+        return aggregate_stances([])
+    packs = classify_titles(clean, stock_hint=stock_hint, use_llm=True)
+    return aggregate_stances(packs)
+
+
+def _bullish_only_hits(
+    titles: Optional[List[str]], *, stock_hint: str = ""
+) -> List[str]:
+    clean = [str(t) for t in (titles or []) if str(t or "").strip()]
+    if not clean:
+        return []
+    packs = classify_titles(clean, stock_hint=stock_hint, use_llm=True)
+    return filter_bullish_titles(clean, packs)
 
 
 def _news_hits_for_stock(
@@ -8324,25 +8323,35 @@ def _score_buy_risk_for_code(
 
 def _allow_buy_candidate_catalyst(
     *,
-    news_n: int,
-    major_catalyst: bool,
-    board_pct: Optional[float],
-    theme_grade: str,
-    kind: str,
+    news_n: int = 0,
+    major_catalyst: bool = False,
+    board_pct: Optional[float] = None,
+    theme_grade: str = "",
+    kind: str = "",
     bar_struct: Optional[Dict[str, Any]] = None,
     pct_from_high: Optional[float] = None,
     pct5: Optional[float] = None,
+    has_bull_cat: Optional[bool] = None,
+    hard_veto_buy: bool = False,
+    news_tier: str = "",
 ) -> Tuple[bool, str]:
     """
-    催化门控（银之杰 vs 风华）：
-    - 有新闻/重大催化 → 本门不拦（仍受形态/星级/风险值等约束）
-    - 无催化 + 相对高位 → 否（银之杰：近高缩量缓涨不能给是）
-    - 无催化 + 非相对高位 → 放行（风华：低位蓄势可以没个股新闻）
-    本函数只否「近高无催化」；不负责把所有低位票抬成是。
+    催化门控（银之杰 vs 风华 + 新闻五档）：
+    - 重大利空 → 硬否
+    - 只有利好档（has_bull_cat）才算「有催化」；利空/不相关不算
+    - 无利好催化 + 相对高位 → 否（银之杰）
+    - 无利好催化 + 非相对高位 → 放行（风华）
     """
-    has_cat = bool(major_catalyst) or int(news_n or 0) >= 1
+    _ = (board_pct, theme_grade, kind, bar_struct, news_n)
+    if hard_veto_buy or str(news_tier) == TIER_MAJOR_BEAR:
+        return False, f"重大利空催化否决（{news_tier or '重大利空'}）"
 
-    # 相对高位：距窗内高点浅，或 5 日已大涨且回撤不深
+    if has_bull_cat is None:
+        # 兼容旧调用：裸 news_n 不再放行，仅 major_catalyst（应为利好重大）可放行
+        has_cat = bool(major_catalyst)
+    else:
+        has_cat = bool(has_bull_cat)
+
     rel_high = False
     if pct_from_high is not None and float(pct_from_high) >= -5.0:
         rel_high = True
@@ -8355,9 +8364,8 @@ def _allow_buy_candidate_catalyst(
         return True, ""
 
     if rel_high:
-        return False, "无催化且相对高位，候选否（银之杰型）"
+        return False, "无利好催化且相对高位，候选否（银之杰型）"
 
-    # 低位无个股新闻：不因缺催化否决（风华型）；是否给是仍看买点/主题/风险
     return True, ""
 
 
@@ -8585,7 +8593,16 @@ def build_daily_short_picks(
             stock_grade = "偏好"
 
         mild_days = _mild_up_flow_streak(history, code, asof, pct, flow)
-        major = nh >= 1
+        named_titles = _news_hits_for_stock(code, disp_name, titles)
+        stance_src = named_titles if named_titles else list(titles or [])[:6]
+        news_agg = _stance_aggregate_for_titles(
+            stance_src, stock_hint=str(disp_name or "")
+        )
+        if news_agg.get("hard_veto_buy"):
+            continue
+        major = bool(news_agg.get("major_bull"))
+        bull_nh = int(news_agg.get("bull_n") or 0)
+        nh = bull_nh  # 后续形态/门控只认利好条数
         ohlc = _quote_ohlc(q)
         bar_ks = _day_kline_structure(
             open_=ohlc["open"],
@@ -8597,7 +8614,7 @@ def build_daily_short_picks(
         )
         # 短线优先用周转形态（含热板连涨/回调续涨），再回落通用买点
         setup = _detect_t1_short_setup(
-            news_hits=nh,
+            news_hits=bull_nh,
             board_pct=board_pct,
             pct=pct,
             pct5=pct5,
@@ -8611,6 +8628,15 @@ def build_daily_short_picks(
             prev_close=ohlc["prev_close"],
             bar_struct=bar_ks,
         )
+        if news_agg.get("block_stabilize") and str(setup.get("kind") or "") in (
+            "stabilize_up",
+            "mild_inflow_run",
+            "catalyst_grind",
+            "t1_dip_hold",
+            "t1_resume",
+            "t1_catalyst_up",
+        ):
+            setup = {**setup, "buy_ok": False}
         if not setup.get("buy_ok"):
             setup = _detect_buy_setup(
                 theme_ok=True,
@@ -8631,12 +8657,23 @@ def build_daily_short_picks(
                 prev_close=ohlc["prev_close"],
                 bar_struct=bar_ks,
             )
+        if news_agg.get("block_stabilize") and str(setup.get("kind") or "") in (
+            "stabilize_up",
+            "mild_inflow_run",
+            "catalyst_grind",
+        ):
+            continue
         if not setup.get("buy_ok"):
             continue
 
         kind = str(setup.get("kind") or "")
-        # 粗筛：无催化且 5 日已大涨≈相对高位 → 跳过；低位无新闻留给风华型，等 risk 用 pfh 终判
-        if int(nh or 0) <= 0 and not bool(major) and pct5 is not None and float(pct5) >= 12.0:
+        # 粗筛：无利好催化且 5 日已大涨≈相对高位 → 跳过；低位无新闻留给风华型
+        if (
+            bull_nh <= 0
+            and not bool(major)
+            and pct5 is not None
+            and float(pct5) >= 12.0
+        ):
             continue
 
         short_kinds = (
@@ -8675,7 +8712,7 @@ def build_daily_short_picks(
         if "短持" not in str(action):
             action = f"{action}；短持1～3天见好就收"
 
-        buy_method = _resolve_buy_method(setup, pct=pct, news_hits=nh)
+        buy_method = _resolve_buy_method(setup, pct=pct, news_hits=bull_nh)
         if not buy_method:
             buy_method = str(setup.get("label") or "C热板连涨")
 
@@ -8689,12 +8726,12 @@ def build_daily_short_picks(
             flow5=flow5,
             vol_ratio=vol_ratio,
             mild_up_days=mild_days,
-            news_hits=_news_hits_for_stock(code, disp_name, titles),
+            news_hits=named_titles or stance_src,
             theme_grade=theme_grade,
         )
         risk_score = float(risk.get("风险值") or 0)
         _gate_ok2, _gate_why2 = _allow_buy_candidate_catalyst(
-            news_n=int(nh or 0),
+            news_n=bull_nh,
             major_catalyst=bool(major),
             board_pct=board_pct,
             theme_grade=theme_grade,
@@ -8702,6 +8739,9 @@ def build_daily_short_picks(
             bar_struct=bar_ks,
             pct_from_high=risk.get("pct_from_high"),
             pct5=pct5,
+            has_bull_cat=bool(news_agg.get("has_bull_cat")),
+            hard_veto_buy=bool(news_agg.get("hard_veto_buy")),
+            news_tier=str(news_agg.get("tier") or ""),
         )
         if not _gate_ok2:
             continue
@@ -9092,10 +9132,11 @@ def build_forward_watch(
         theme_good_streak = (
             good_before + 1 if theme_grade in ("走强", "偏好") else good_before
         )
+        theme_bull_n = len(_bullish_only_hits(news_hits))
         theme_stars, theme_score_why = _score_theme(
             theme=theme,
             consecutive_good=theme_good_streak,
-            news_hits=len(news_hits),
+            news_hits=theme_bull_n,
             board_pct=board_pct,
             board_flow=board_flow,
             board_pct5=board_pct5,
@@ -9294,6 +9335,14 @@ def build_forward_watch(
                 kicked_notes.append(f"{name}({code}): {kick_why}")
                 continue
 
+            named_news = _news_hits_for_stock(code, name, news_hits)
+            stance_src = named_news if named_news else list(news_hits or [])[:6]
+            news_agg = _stance_aggregate_for_titles(
+                stance_src, stock_hint=str(name or "")
+            )
+            major_cat = bool(news_agg.get("major_bull"))
+            bull_news_n = int(news_agg.get("bull_n") or 0)
+
             worth, worth_why = _stock_worth_in_theme(
                 stock_pct=pct,
                 stock_pct_5d=pct5,
@@ -9301,7 +9350,7 @@ def build_forward_watch(
                 stock_flow_5d=stock_flow_5d,
                 stock_grade=stock_grade,
                 theme_ok=theme_ok,
-                major_catalyst=_major_catalyst_in_hits(news_hits),
+                major_catalyst=major_cat,
                 is_seed=True,
                 dig_wait_theme=dig_wait,
             )
@@ -9346,7 +9395,6 @@ def build_forward_watch(
                 theme_grade=theme_grade,
                 board_pct=board_pct,
             )
-            major_cat = _major_catalyst_in_hits(news_hits)
             ohlc = _quote_ohlc(q)
             bar_ks = _day_kline_structure(
                 open_=ohlc["open"],
@@ -9376,10 +9424,26 @@ def build_forward_watch(
                 prev_close=ohlc["prev_close"],
                 bar_struct=bar_ks,
             )
+            # 利空未消化：禁止 E/缓涨类 buy_ok（宁德式飞刀）
+            if news_agg.get("block_stabilize") and str(
+                buy_setup.get("kind") or ""
+            ) in ("stabilize_up", "mild_inflow_run", "catalyst_grind"):
+                buy_setup = {
+                    **buy_setup,
+                    "buy_ok": False,
+                    "kind": "dig_watch",
+                    "label": "止跌观察",
+                    "why": (
+                        f"利空未消化不作止跌买点（{news_agg.get('tier')}）；"
+                        f"{news_agg.get('why')}"
+                    ),
+                    "action": "利空叙事未消化：先观察，勿当 E/D 开仓",
+                    "kline": buy_setup.get("kline") or "",
+                }
             # 热板时再扫短线形态，用于「买入方法」展示（评分仍用 buy_setup）
             method_setup = buy_setup
             t1_setup = _detect_t1_short_setup(
-                news_hits=len(news_hits),
+                news_hits=bull_news_n,
                 board_pct=board_pct,
                 pct=pct,
                 pct5=pct5,
@@ -9393,8 +9457,20 @@ def build_forward_watch(
                 prev_close=ohlc["prev_close"],
                 bar_struct=bar_ks,
             )
-            if t1_setup.get("buy_ok"):
-                method_setup = t1_setup
+            if t1_setup.get("buy_ok") and not news_agg.get("hard_veto_buy"):
+                _t1k = str(t1_setup.get("kind") or "")
+                if not (
+                    news_agg.get("block_stabilize")
+                    and _t1k
+                    in (
+                        "stabilize_up",
+                        "mild_inflow_run",
+                        "catalyst_grind",
+                        "t1_resume",
+                        "t1_dip_hold",
+                    )
+                ):
+                    method_setup = t1_setup
             (
                 wave_stars,
                 buy_stars,
@@ -9405,7 +9481,7 @@ def build_forward_watch(
             ) = _score_stock(
                 theme=theme,
                 consecutive=consecutive,
-                news_hits=len(news_hits),
+                news_hits=bull_news_n,
                 board_flow=board_flow,
                 board_pct=board_pct,
                 board_pct5=board_pct5,
@@ -9427,7 +9503,7 @@ def build_forward_watch(
                 "【买点星】" + "；".join(buy_reasons),
             ]
             next_bias, next_bias_disp, next_bias_why = _score_next_move_bias(
-                news_hits=len(news_hits),
+                news_hits=bull_news_n,
                 major_catalyst=major_cat,
                 theme_ok=theme_ok,
                 theme_grade=theme_grade,
@@ -9512,7 +9588,7 @@ def build_forward_watch(
                 or ""
             )
             _gate_ok, _gate_why = _allow_buy_candidate_catalyst(
-                news_n=len(news_hits or []),
+                news_n=bull_news_n,
                 major_catalyst=bool(major_cat),
                 board_pct=board_pct,
                 theme_grade=theme_grade,
@@ -9520,13 +9596,36 @@ def build_forward_watch(
                 bar_struct=bar_ks,
                 pct_from_high=risk.get("pct_from_high"),
                 pct5=pct5,
+                has_bull_cat=bool(news_agg.get("has_bull_cat")),
+                hard_veto_buy=bool(news_agg.get("hard_veto_buy")),
+                news_tier=str(news_agg.get("tier") or ""),
             )
-            if buy_ready and not _gate_ok:
+            if buy_ready and news_agg.get("hard_veto_buy"):
+                buy_ready = False
+                buy_action_gate_note = (
+                    f"重大利空否决（{news_agg.get('tier')}）：{news_agg.get('why')}"
+                )
+            elif buy_ready and not _gate_ok:
                 buy_ready = False
                 buy_action_gate_note = _gate_why
             else:
                 buy_action_gate_note = ""
-
+            if buy_ready and news_agg.get("block_stabilize") and str(
+                (buy_setup if buy_setup.get("buy_ok") else method_setup).get("kind")
+                or ""
+            ) in (
+                "stabilize_up",
+                "mild_inflow_run",
+                "catalyst_grind",
+                "t1_dip_hold",
+                "t1_resume",
+            ):
+                buy_ready = False
+                buy_method = ""
+                buy_action_gate_note = (
+                    buy_action_gate_note
+                    or f"利空未消化禁E（{news_agg.get('tier')}）"
+                )
             buy_range, buy_action = _suggest_buy_plan(
                 px,
                 pct,
@@ -9546,7 +9645,7 @@ def build_forward_watch(
                 buy_method = _resolve_buy_method(
                     method_setup if method_setup.get("buy_ok") else buy_setup,
                     pct=pct,
-                    news_hits=len(news_hits),
+                    news_hits=bull_news_n,
                 )
                 if not buy_method:
                     buy_method = str(
@@ -9595,7 +9694,7 @@ def build_forward_watch(
                         "board_pct": board_pct,
                         "rs": timing.get("rs_val"),
                         "flow": stock_flow,
-                        "news_hits": len(news_hits or []),
+                        "news_hits": bull_news_n,
                         "risk_score": risk_score,
                         "mild_up_days": mild_flow_days,
                     },
@@ -9637,8 +9736,14 @@ def build_forward_watch(
                 evidence.append(
                     f"【ML偏多】{float(ml_score):+.2f}，短窗超额偏正"
                 )
-            if news_hits:
-                evidence.append("【新闻】" + "；".join(news_hits[:3]))
+            if news_hits or news_agg.get("tier"):
+                evidence.append(
+                    f"【新闻五档】{news_agg.get('tier')} "
+                    f"利好{news_agg.get('bull_n')}利空{news_agg.get('bear_n')}；"
+                    f"{news_agg.get('why')}"
+                )
+                if news_hits:
+                    evidence.append("【新闻原文】" + "；".join(news_hits[:3]))
             if theme_grade in ("偏弱", "走弱"):
                 evidence.append(
                     f"【主题{theme_grade}】{weak_why}"
@@ -9732,6 +9837,8 @@ def build_forward_watch(
                         or ""
                     ),
                     "买入方法": buy_method,
+                    "新闻五档": str(news_agg.get("tier") or ""),
+                    "新闻催化": "是" if news_agg.get("has_bull_cat") else "否",
                     "风险值": risk_score,
                     "风险档": risk.get("风险档"),
                     "风险说明": risk.get("风险说明"),
