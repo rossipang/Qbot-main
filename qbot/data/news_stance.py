@@ -137,7 +137,9 @@ _LLM_ENABLED_DEFAULT = True
 
 
 def llm_enabled() -> bool:
-    v = str(os.environ.get("QBOT_NEWS_STANCE_LLM", "1") or "1").strip().lower()
+    # 默认关：前瞻刷新要秒级；开 LLM 会同步打 Cursor（单次可达数分钟）把整池卡死。
+    # 需要模型判多空时再设 QBOT_NEWS_STANCE_LLM=1。
+    v = str(os.environ.get("QBOT_NEWS_STANCE_LLM", "0") or "0").strip().lower()
     return v not in ("0", "false", "no", "off")
 
 

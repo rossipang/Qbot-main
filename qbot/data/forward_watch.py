@@ -91,7 +91,7 @@ LATEST_PATH = (
 )
 
 # 管道版本：缓存里可对照是否按新规则刷新
-PIPELINE_VERSION = "forward_v7_48_news_stance5"
+PIPELINE_VERSION = "forward_v7_49_news_stance_fast"
 
 # 风险分用日K缓存：code:asof → bars（单次刷新内复用；不含 limit，避免 28/90 双重拉）
 _RISK_BARS_CACHE: Dict[str, List[Dict[str, Any]]] = {}
@@ -3186,16 +3186,24 @@ def _news_hits_for_keys(keys: List[str], news_df: pd.DataFrame) -> List[str]:
 
 
 def _major_catalyst_in_hits(news_hits: List[str]) -> bool:
-    """仅「重大利好」算重大催化；利空/不相关标题一律不算。"""
-    clean = [
-        str(t)
-        for t in (news_hits or [])
-        if str(t or "").strip() and not _is_weak_forward_news(t)
-    ]
-    if not clean:
-        return False
-    packs = classify_titles(clean[:8], use_llm=True)
-    return any(str(p.get("tier") or "") == TIER_MAJOR_BULL for p in packs)
+    """仅「重大利好」算重大催化；利空/不相关标题一律不算。
+
+    主题发现热路径只用关键词五档（禁同步 LLM，否则刷新会卡死）。
+    """
+    for t in news_hits or []:
+        title = str(t or "").strip()
+        if not title or _is_weak_forward_news(title):
+            continue
+        kw = classify_title_keyword(title)
+        tier = str(kw.get("tier") or "")
+        score = float(TIER_SCORE.get(tier, 0.0) or 0.0)
+        if score < 0:
+            continue
+        if tier == TIER_MAJOR_BULL:
+            return True
+        if news_title_is_major_catalyst(title) and score > 0:
+            return True
+    return False
 
 
 def _board_quality_score(
@@ -7499,7 +7507,8 @@ def _news_risk_delta(news_hits: Optional[List[str]]) -> Tuple[float, List[str]]:
     titles = [str(t) for t in (news_hits or [])[:8] if str(t or "").strip()]
     if not titles:
         return 0.0, why
-    packs = classify_titles(titles, use_llm=True)
+    # 刷新热路径：跟随 QBOT_NEWS_STANCE_LLM（默认关=关键词五档）
+    packs = classify_titles(titles, use_llm=None)
     agg = aggregate_stances(packs)
     return risk_delta_from_aggregate(agg)
 
@@ -7512,7 +7521,7 @@ def _stance_aggregate_for_titles(
     clean = [str(t) for t in (titles or []) if str(t or "").strip()]
     if not clean:
         return aggregate_stances([])
-    packs = classify_titles(clean, stock_hint=stock_hint, use_llm=True)
+    packs = classify_titles(clean, stock_hint=stock_hint, use_llm=None)
     return aggregate_stances(packs)
 
 
@@ -7522,7 +7531,7 @@ def _bullish_only_hits(
     clean = [str(t) for t in (titles or []) if str(t or "").strip()]
     if not clean:
         return []
-    packs = classify_titles(clean, stock_hint=stock_hint, use_llm=True)
+    packs = classify_titles(clean, stock_hint=stock_hint, use_llm=None)
     return filter_bullish_titles(clean, packs)
 
 
