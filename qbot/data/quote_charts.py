@@ -7,7 +7,7 @@ from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
-from bokeh.embed import file_html
+from bokeh.embed import components, file_html
 from bokeh.layouts import column
 from bokeh.models import (
     ColumnDataSource,
@@ -34,6 +34,75 @@ MA5_COLOR = "#e67e22"
 MA20_COLOR = "#8e44ad"
 VOLUME_UP = "#f7a1a4"
 VOLUME_DOWN = "#8fd19e"
+
+_BOKEH_STATIC_DIRNAME = "_bokeh_static"
+_BOKEH_JS_FILES = (
+    "bokeh.min.js",
+    "bokeh-gl.min.js",
+    "bokeh-widgets.min.js",
+    "bokeh-tables.min.js",
+    "bokeh-mathjax.min.js",
+)
+
+
+def ensure_bokeh_static(target_dir: Union[str, Path]) -> Path:
+    """把本机 bokeh static 拷到输出目录旁，供 WebView file:// 相对路径加载。"""
+    import bokeh
+    import shutil
+
+    target_dir = Path(target_dir)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    dst = target_dir / _BOKEH_STATIC_DIRNAME
+    marker = dst / "js" / "bokeh.min.js"
+    if marker.exists() and marker.stat().st_size > 1000:
+        return dst
+    src = Path(bokeh.__file__).resolve().parent / "server" / "static"
+    if not (src / "js" / "bokeh.min.js").exists():
+        raise FileNotFoundError(f"bokeh static 缺失: {src}")
+    if dst.exists():
+        shutil.rmtree(dst, ignore_errors=True)
+    shutil.copytree(src, dst)
+    return dst
+
+
+def file_html_for_webview(layout, title: str, output_dir: Union[str, Path]) -> str:
+    """
+    生成给 wx WebViewEdge 看的 HTML。
+
+    INLINE 整页常达 2MB+，WebView2 NavigateToString / 大文件加载会空白。
+    改为本地 static + components()，页面本身只有几十 KB。
+    """
+    output_dir = Path(output_dir)
+    ensure_bokeh_static(output_dir)
+    script, div = components(layout)
+    js_tags = []
+    static_js = output_dir / _BOKEH_STATIC_DIRNAME / "js"
+    for name in _BOKEH_JS_FILES:
+        if (static_js / name).exists():
+            js_tags.append(
+                f'<script src="{_BOKEH_STATIC_DIRNAME}/js/{name}"></script>'
+            )
+    if not js_tags:
+        return file_html(layout, INLINE, title=title or "chart")
+    safe_title = (
+        str(title or "chart")
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+    return (
+        "<!DOCTYPE html>\n<html lang=\"zh-CN\">\n<head>\n"
+        "<meta charset=\"utf-8\"/>\n"
+        f"<title>{safe_title}</title>\n"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"/>\n"
+        + "\n".join(js_tags)
+        + "\n</head>\n<body>\n"
+        + str(div)
+        + "\n"
+        + str(script)
+        + "\n</body>\n</html>\n"
+    )
 
 
 def inject_into_bokeh_html(
@@ -1417,8 +1486,8 @@ def render_quote_dashboard(
         northbound=northbound,
         finance=finance,
     )
-    # INLINE：本地 file:// 打开不依赖外网 CDN（默认页用 CDN，WebView 更稳用内联）
-    html = file_html(layout, INLINE, title=title)
+    # WebView2 扛不住 INLINE 大页；本地 static + 小 HTML
+    html = file_html_for_webview(layout, title=title, output_dir=Path(output_path).parent)
 
     # 底部：个股近一周新闻 + 公告（替代原先最近 20 条行情表）
     news_html = _build_stock_news_section(code)
@@ -1691,7 +1760,9 @@ def render_intraday_dashboard(
         )
 
     layout = column(*plots, sizing_mode="stretch_width")
-    html = file_html(layout, INLINE, title=f"{title} 分时")
+    html = file_html_for_webview(
+        layout, title=f"{title} 分时", output_dir=Path(output_path).parent
+    )
     css = """
 <style>
 body { font-family:"Microsoft YaHei","Segoe UI",Arial,sans-serif; margin:0; padding:8px 10px 16px; background:#f0f2f5; }

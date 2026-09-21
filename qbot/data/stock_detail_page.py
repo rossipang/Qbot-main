@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
 import pandas as pd
-from bokeh.embed import file_html
 from bokeh.layouts import column
 from bokeh.models import (
     ColumnDataSource,
@@ -27,7 +26,6 @@ try:
 except ImportError:  # pragma: no cover
     from bokeh.models import Panel as TabPanel  # noqa: N813
 from bokeh.plotting import figure
-from bokeh.resources import INLINE
 
 from qbot.data.quote_charts import (
     DOWN_COLOR,
@@ -46,6 +44,7 @@ from qbot.data.quote_charts import (
     _prepare_ohlcv,
     _sign_cls,
     _tools,
+    file_html_for_webview,
     inject_into_bokeh_html,
 )
 
@@ -845,7 +844,9 @@ def render_stock_detail_page(
     )
     layout = column(header, tabs, spacing=14, sizing_mode="stretch_width")
     title = f"{name} {code}".strip() or str(code)
-    html = file_html(layout, INLINE, title=title)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    html = file_html_for_webview(layout, title=title, output_dir=output_path.parent)
     css = _page_css()
     js = _page_tab_keep_js(code)
     if "<body" in html.lower():
@@ -853,7 +854,5 @@ def render_stock_detail_page(
     else:
         html = css + html + js
 
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html, encoding="utf-8")
     return output_path
